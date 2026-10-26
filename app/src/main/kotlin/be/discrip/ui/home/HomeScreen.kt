@@ -2,6 +2,9 @@ package be.discrip.ui.home
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -9,8 +12,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import be.discrip.AppContainer
 import be.discrip.R
+import be.discrip.ui.components.AlertAction
+import be.discrip.ui.components.AlertActionStyle
 import be.discrip.ui.components.ButtonRow
 import be.discrip.ui.components.GroupedSection
+import be.discrip.ui.components.HigAlert
 import be.discrip.ui.components.HigScaffold
 import be.discrip.ui.components.IconRowSeparatorInset
 import be.discrip.ui.components.NavigationRow
@@ -33,6 +39,7 @@ fun HomeScreen(
     val viewModel = viewModel { HomeViewModel(container) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = HigTheme.colors
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
@@ -55,7 +62,7 @@ fun HomeScreen(
                 row {
                     ButtonRow(
                         text = stringResource(R.string.home_draft_clear),
-                        onClick = viewModel::clearDraft,
+                        onClick = { confirmClear = true },
                         color = colors.red,
                     )
                 }
@@ -123,5 +130,20 @@ fun HomeScreen(
                 )
             }
         }
+    }
+
+    if (confirmClear) {
+        HigAlert(
+            title = stringResource(R.string.home_clear_title),
+            message = stringResource(R.string.home_clear_message),
+            actions = listOf(
+                AlertAction(stringResource(R.string.action_cancel), AlertActionStyle.CANCEL) { confirmClear = false },
+                AlertAction(stringResource(R.string.home_draft_clear), AlertActionStyle.DESTRUCTIVE) {
+                    confirmClear = false
+                    viewModel.clearDraft()
+                },
+            ),
+            onDismissRequest = { confirmClear = false },
+        )
     }
 }

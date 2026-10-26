@@ -28,6 +28,9 @@
     <string name="kind_other">Other</string>
     <string name="home_draft_header">Next rip</string>
     <string name="home_draft_clear">Clear</string>
+    <string name="home_clear_title">Clear the metadata?</string>
+    <string name="home_clear_message">The title and file name chosen for the next rip are removed.</string>
+    <string name="action_cancel">Cancel</string>
     <string name="home_new_rip_header">New rip</string>
     <string name="home_metadata_row">Metadata and file name</string>
     <string name="home_new_rip_footer">Look the film up on TMDB or enter the details yourself; the file gets the name Plex expects.</string>

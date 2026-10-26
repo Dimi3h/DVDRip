@@ -25,7 +25,7 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       - name: Test platform-independent core
-        run: ./gradlew -p core test --stacktrace
+        run: ./gradlew -p core test
       - name: Upload core test report
         if: failure()
         uses: actions/upload-artifact@v7
@@ -45,7 +45,7 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       - name: Unit tests, debug APK and lint
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace --warning-mode all 2>&1 | tee gradle-output.log
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --warning-mode all 2>&1 | tee gradle-output.log
       - name: Show Gradle deprecation warnings
         if: always()
         run: |

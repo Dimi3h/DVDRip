@@ -26,6 +26,9 @@
     <string name="kind_other">Andere</string>
     <string name="home_draft_header">Volgende rip</string>
     <string name="home_draft_clear">Wissen</string>
+    <string name="home_clear_title">Metadata wissen?</string>
+    <string name="home_clear_message">De titel en bestandsnaam voor de volgende rip worden verwijderd.</string>
+    <string name="action_cancel">Annuleer</string>
     <string name="home_new_rip_header">Nieuwe rip</string>
     <string name="home_metadata_row">Metadata en bestandsnaam</string>
     <string name="home_new_rip_footer">Zoek de film op TMDB of vul de gegevens zelf in; het bestand krijgt de naam die Plex verwacht.</string>

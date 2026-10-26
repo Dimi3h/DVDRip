@@ -116,17 +116,6 @@ object HigIcons {
         }
     }
 
-    val DiscOutline: ImageVector by lazy {
-        icon("DiscOutline") {
-            stroke(1.7f) { circle(12f, 12f, 9.2f) }
-            stroke(1.7f) { circle(12f, 12f, 2.6f) }
-            stroke(1.5f) {
-                moveTo(12f, 5.6f)
-                arcToRelative(6.4f, 6.4f, 0f, false, true, 6.4f, 6.4f)
-            }
-        }
-    }
-
     val Gear: ImageVector by lazy {
         icon("Gear") {
             fill(evenOdd = true) {
@@ -152,17 +141,6 @@ object HigIcons {
                 }
                 close()
                 circle(12f, 12f, 3.4f)
-            }
-        }
-    }
-
-    val Clock: ImageVector by lazy {
-        icon("Clock") {
-            stroke(1.8f) { circle(12f, 12f, 9.2f) }
-            stroke(1.9f) {
-                moveTo(12f, 6.8f)
-                lineTo(12f, 12f)
-                lineTo(15.6f, 14.2f)
             }
         }
     }
@@ -297,38 +275,6 @@ object HigIcons {
                     roundRect(4.4f, y, 1.6f, 1.6f, 0.4f)
                     roundRect(18f, y, 1.6f, 1.6f, 0.4f)
                 }
-            }
-        }
-    }
-
-    val Person: ImageVector by lazy {
-        icon("Person") {
-            fill {
-                circle(12f, 8f, 4f)
-                moveTo(4.5f, 19.5f)
-                curveTo(4.5f, 15.9f, 7.9f, 13.6f, 12f, 13.6f)
-                curveTo(16.1f, 13.6f, 19.5f, 15.9f, 19.5f, 19.5f)
-                curveTo(19.5f, 20.1f, 19.1f, 20.5f, 18.5f, 20.5f)
-                lineTo(5.5f, 20.5f)
-                curveTo(4.9f, 20.5f, 4.5f, 20.1f, 4.5f, 19.5f)
-                close()
-            }
-        }
-    }
-
-    val Key: ImageVector by lazy {
-        icon("Key") {
-            fill(evenOdd = true) {
-                circle(8f, 12f, 5f)
-                circle(6.5f, 12f, 1.5f)
-            }
-            stroke(2.4f) {
-                moveTo(12.5f, 12f)
-                lineTo(21f, 12f)
-                moveTo(18f, 12f)
-                lineTo(18f, 15f)
-                moveTo(21f, 12f)
-                lineTo(21f, 14.5f)
             }
         }
     }

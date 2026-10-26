@@ -75,8 +75,6 @@ android {
         abortOnError = true
         warningsAsErrors = false
         checkDependencies = false
-        // Also write build/reports/lint-results-debug.txt, which CI prints into its log.
-        textReport = true
         // targetSdk 35 is a project requirement, not an oversight.
         disable += "OldTargetApi"
     }
