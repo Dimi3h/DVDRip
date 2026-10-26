@@ -1,9 +1,10 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
+// AGP 9 compiles Kotlin itself (built-in Kotlin); the root build pins the Kotlin Gradle plugin
+// version so the app and the core build use the same compiler.
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
@@ -18,7 +19,9 @@ val keystoreProperties = Properties().apply {
 
 android {
     namespace = "be.discrip"
-    compileSdk = 36
+    // Current AndroidX, Compose and OkHttp releases require compiling against API 37. The app
+    // still targets API 35 as specified; compileSdk only decides which APIs are visible.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "be.discrip"

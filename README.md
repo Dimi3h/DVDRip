@@ -47,11 +47,15 @@ USB, disc reading and ripping arrive in phases 2 and 3; the home screen does not
 
 Requirements:
 
-- JDK 17 or newer (CI uses Temurin 21).
-- Android SDK with platform `android-36` and build tools (Android Studio installs them, or
-  `sdkmanager "platforms;android-36" "build-tools;36.0.0"`), and `local.properties` with `sdk.dir`
-  or the `ANDROID_HOME` environment variable.
+- JDK 17 or newer (CI uses Temurin 21). The Gradle wrapper (9.8.2) downloads Gradle itself.
+- Android SDK with the API 37 platform and current build tools (Android Studio installs them;
+  otherwise the Android Gradle plugin downloads missing ones when the SDK licenses are accepted),
+  and `local.properties` with `sdk.dir` or the `ANDROID_HOME` environment variable.
 - From phase 3: NDK r27 or newer and CMake (installed through the SDK manager).
+
+Toolchain: Android Gradle plugin 9.4 with its built-in Kotlin support, Kotlin 2.4, Compose BOM
+2026.09. `compileSdk` is 37 because current AndroidX, Compose and OkHttp releases require it;
+`targetSdk` stays 35 and `minSdk` is 29 (Android 10).
 
 Commands (from the repository root):
 
@@ -75,6 +79,11 @@ keyPassword=...
 
 Without it, release builds are signed with the debug key, which is fine for sideloading on your own
 phone.
+
+The wrapper has no `distributionSha256Sum` yet: the official checksum host was not reachable from
+the environment this was written in. To pin it, run
+`./gradlew wrapper --gradle-version 9.8.2 --gradle-distribution-sha256-sum <sum>` with the sum from
+https://gradle.org/release-checksums/.
 
 **CI.** `.github/workflows/ci.yml` runs on every push: core tests, app unit tests, the debug APK
 (uploaded as the `discrip-debug-apk` artifact) and lint. A third job prints which pinned
