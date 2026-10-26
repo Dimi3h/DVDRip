@@ -85,6 +85,9 @@ class SecretStore(private val context: Context) {
         return create()
     }
 
+    // Jetpack Security is deprecated; it still works and the spec asks for it. Only this class
+    // would change if it is ever replaced by direct Keystore use.
+    @Suppress("DEPRECATION")
     private fun create(): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)

@@ -190,7 +190,7 @@ internal fun mergeSummaries(primary: MovieSummaryDto, fallback: MovieSummaryDto?
         (primary.title != primary.originalTitle || primary.originalLanguage == primaryLanguage)
     val title = when {
         primaryIsTranslated -> primary.title
-        !fallback?.title.isNullOrBlank() -> fallback!!.title
+        !fallback?.title.isNullOrBlank() -> fallback.title
         primary.title.isNotBlank() -> primary.title
         else -> primary.originalTitle
     }

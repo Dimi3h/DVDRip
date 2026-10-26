@@ -17,8 +17,12 @@ import java.util.Locale
 internal fun rememberSettingsViewModel(container: AppContainer): SettingsViewModel =
     viewModel { SettingsViewModel(container) }
 
+/** The app's current locale, read observably so number formats follow a language change. */
 @Composable
-internal fun currentLocale(): Locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
+internal fun currentLocale(): Locale {
+    val locales = LocalConfiguration.current.locales
+    return if (locales.isEmpty) Locale.ROOT else locales[0]
+}
 
 /**
  * A settings text field that owns its text while the user types and reports every change. The

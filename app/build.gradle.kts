@@ -75,6 +75,9 @@ android {
         abortOnError = true
         warningsAsErrors = false
         checkDependencies = false
+        // Print findings in the build log as well, so CI failures are readable without artifacts.
+        textReport = true
+        textOutput = file("stdout")
     }
 }
 
