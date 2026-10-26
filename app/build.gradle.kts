@@ -75,9 +75,8 @@ android {
         abortOnError = true
         warningsAsErrors = false
         checkDependencies = false
-        // Print findings in the build log as well, so CI failures are readable without artifacts.
+        // Also write build/reports/lint-results-debug.txt, which CI prints into its log.
         textReport = true
-        textOutput = file("stdout")
     }
 }
 

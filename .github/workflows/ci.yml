@@ -45,7 +45,10 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       - name: Unit tests, debug APK and lint
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace --warning-mode all
+      - name: Show lint findings
+        if: always()
+        run: cat app/build/reports/lint-results-debug.txt 2>/dev/null || echo "No lint report was written."
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
