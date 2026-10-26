@@ -77,6 +77,8 @@ android {
         checkDependencies = false
         // Also write build/reports/lint-results-debug.txt, which CI prints into its log.
         textReport = true
+        // targetSdk 35 is a project requirement, not an oversight.
+        disable += "OldTargetApi"
     }
 }
 
@@ -87,7 +89,7 @@ kotlin {
 }
 
 dependencies {
-    implementation("be.discrip:core:1.0")
+    implementation(libs.discrip.core)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

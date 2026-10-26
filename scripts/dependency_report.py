@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 GOOGLE = "https://dl.google.com/dl/android/maven2"
 CENTRAL = "https://repo.maven.apache.org/maven2"
 PORTAL = "https://plugins.gradle.org/m2"
+OWN_GROUP = "be.discrip"
 UNSTABLE = re.compile(r"(alpha|beta|rc|dev|eap|snapshot|preview|-m\d|milestone)", re.IGNORECASE)
 
 # Plugin ids that are not published as Gradle plugin markers where we would look for them.
@@ -65,6 +66,8 @@ def main() -> int:
         if current is None:
             continue  # managed by a BOM
         group, artifact = entry["module"].split(":")
+        if group == OWN_GROUP:
+            continue  # built from this repository
         rows.append((name, current, newest_stable(repository_for(group), group, artifact)))
 
     for name, entry in catalog.get("plugins", {}).items():

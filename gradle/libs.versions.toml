@@ -19,6 +19,9 @@ androidxTestExt = "1.3.0"
 androidxTestRunner = "1.7.0"
 
 [libraries]
+# This repository's platform-independent build (core/), substituted by includeBuild("core").
+discrip-core = { module = "be.discrip:core", version = "1.0" }
+
 # Shared (Maven Central)
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

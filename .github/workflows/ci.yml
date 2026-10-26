@@ -45,7 +45,12 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       - name: Unit tests, debug APK and lint
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace --warning-mode all
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace --warning-mode all 2>&1 | tee gradle-output.log
+      - name: Show Gradle deprecation warnings
+        if: always()
+        run: |
+          grep -i -B1 -A3 "deprecat" gradle-output.log > deprecations.txt || true
+          if [ -s deprecations.txt ]; then head -n 120 deprecations.txt; else echo "No deprecation warnings."; fi
       - name: Show lint findings
         if: always()
         run: cat app/build/reports/lint-results-debug.txt 2>/dev/null || echo "No lint report was written."
