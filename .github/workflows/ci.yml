@@ -139,6 +139,8 @@ jobs:
           api-level: 30
           target: google_apis
           arch: x86_64
+          # The default userdata partition (7.2 GB) no longer fits next to the native build.
+          disk-size: 2048M
           disable-animations: true
           script: ./gradlew :app:connectedDebugAndroidTest
       - name: Instrumented test results
