@@ -3,6 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
+    // The simulated drive and the CSS scrambler, for these tests and the app's instrumented ones.
+    `java-test-fixtures`
 }
 
 group = "be.discrip"

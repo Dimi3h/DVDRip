@@ -52,6 +52,9 @@ class RipTestRig(name: String) : Closeable {
     var nasGoneFromConnection: Int? = null
     private var connections = 0
 
+    /** Lends the disc in the "USB drive", by its insertion number. */
+    var lend: (insertion: Long) -> DriveDisc? = { null }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val image: DvdSource
     val manager: RipManager
@@ -78,14 +81,25 @@ class RipTestRig(name: String) : Closeable {
                 if (gone != null && connections >= gone) throw NasException.Unreachable(IOException("The test took the NAS away"))
                 Nas.connect(nasTarget)
             },
+            drives = { lend(it) },
         )
     }
 
-    suspend fun openImage(): SourceState.Ready {
-        manager.open(image)
-        val state = withTimeout(OPEN_TIMEOUT) { manager.source.first { it is SourceState.Ready || it is SourceState.Failed } }
+    suspend fun openImage(): SourceState.Ready = open(image)
+
+    /** Opens [source] and waits until it is ready. */
+    suspend fun open(source: DvdSource): SourceState.Ready {
+        val state = openUntilSettled(source)
         assertTrue(state.toString(), state is SourceState.Ready)
         return state as SourceState.Ready
+    }
+
+    /** Opens [source] and waits until it is ready or failed. */
+    suspend fun openUntilSettled(source: DvdSource): SourceState {
+        manager.open(source)
+        return withTimeout(OPEN_TIMEOUT) {
+            manager.source.first { (it is SourceState.Ready || it is SourceState.Failed) && it.sourceOrNull == source }
+        }
     }
 
     /** All audio and subtitle tracks of the main title, to [storage] with the current settings. */
@@ -95,10 +109,11 @@ class RipTestRig(name: String) : Closeable {
         metadata: MovieMetadata = MovieMetadata(title = "Testfilm", year = 2024, tmdbId = 603),
         lpcmToFlac: Boolean = false,
         estimatedBytes: Long = 0,
+        source: DvdSource = image,
     ): RipJob {
         val title = ready.mainTitle!!
         return RipJob(
-            source = image,
+            source = source,
             sourceName = ready.name,
             metadata = metadata,
             title = title,
@@ -119,7 +134,8 @@ class RipTestRig(name: String) : Closeable {
     fun filesIn(folder: File): List<File> = folder.walk().filter { it.isFile }.toList()
 
     override fun close() = runBlocking {
-        manager.close(image)?.join()
+        // The engine has one DVD open at a time, for every rig: whatever this one opened goes.
+        manager.source.value.sourceOrNull?.let { manager.close(it)?.join() }
         scope.cancel()
         work.deleteRecursively()
         Unit

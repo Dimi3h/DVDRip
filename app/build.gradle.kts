@@ -201,5 +201,7 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.okhttp.mockwebserver)
+    // The simulated USB drive and the CSS scrambler of core's tests.
+    androidTestImplementation(testFixtures(libs.discrip.core))
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
