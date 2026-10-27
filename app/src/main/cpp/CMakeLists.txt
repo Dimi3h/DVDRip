@@ -141,4 +141,12 @@ else()
     add_executable(discrip_host host/discrip_host.c)
     target_compile_options(discrip_host PRIVATE -Wall -Wextra -Werror)
     target_link_libraries(discrip_host PRIVATE engine)
+
+    # CSS test helpers from libdvdcss's own code: test vectors for the Kotlin port of the
+    # authentication cipher, and scrambling a test image like a CSS-protected disc.
+    add_executable(css_tool host/css_tool.c)
+    target_include_directories(css_tool PRIVATE config/libdvdcss ${LIBDVDCSS}/src)
+    target_compile_definitions(css_tool PRIVATE _DEFAULT_SOURCE)
+    target_compile_options(css_tool PRIVATE -w)
+    target_link_libraries(css_tool PRIVATE dvdcss)
 endif()

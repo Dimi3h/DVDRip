@@ -15,7 +15,7 @@ typedef struct timeline_entry {
 
 struct dr_reader {
     const dr_plan *plan;
-    dvd_file_t *file;
+    dr_vobs *vobs;
     dr_logger logger;
     int (*cancelled)(void *opaque);
     void *opaque;
@@ -71,7 +71,7 @@ static int is_nav_pack(const uint8_t *block) {
            block[38] == 0 && block[39] == 0 && block[40] == 1 && block[41] == 0xBF && block[44] == 0;
 }
 
-/* A PES packet whose scrambling control is still set: libdvdcss did not decrypt it. */
+/* A PES packet whose scrambling control is still set: it could not be decrypted. */
 static int is_scrambled(const uint8_t *block) {
     int p = pes_start(block);
     if (p < 0 || p + 7 > DR_BLOCK_SIZE) return 0;
@@ -138,7 +138,7 @@ static int on_nav_pack(dr_reader *reader, const uint8_t *block, int64_t position
 static int read_single(dr_reader *reader, uint32_t block, uint8_t *target) {
     for (int attempt = 0; attempt < DR_READ_RETRIES; attempt++) {
         if (reader->cancelled != NULL && reader->cancelled(reader->opaque)) return DR_READ_CANCELLED;
-        if (DVDReadBlocks(reader->file, (int) block, 1, target) == 1) return 1;
+        if (dr_vobs_read(reader->vobs, block, 1, target) == 1) return 1;
     }
     return 0;
 }
@@ -150,7 +150,7 @@ static int read_single(dr_reader *reader, uint32_t block, uint8_t *target) {
 static int read_into_buffer(dr_reader *reader, uint32_t block, int count) {
     uint8_t *out = reader->buffer + reader->buffered;
     int stored = 0;
-    int got = DVDReadBlocks(reader->file, (int) block, (size_t) count, out);
+    int got = dr_vobs_read(reader->vobs, block, count, out);
     if (got == count) {
         stored = count;
     } else {
@@ -269,7 +269,7 @@ static int refill(dr_reader *reader) {
     return DR_READ_END;
 }
 
-dr_reader *dr_reader_open(dvd_reader_t *dvd, const dr_plan *plan, const dr_logger *logger,
+dr_reader *dr_reader_open(dr_dvd *dvd, const dr_plan *plan, const dr_logger *logger,
                           int (*cancelled)(void *opaque), void *opaque, char *error, size_t error_size) {
     dr_reader *reader = calloc(1, sizeof(dr_reader));
     if (reader == NULL) goto memory;
@@ -281,8 +281,8 @@ dr_reader *dr_reader_open(dvd_reader_t *dvd, const dr_plan *plan, const dr_logge
     reader->chapter_starts = malloc(sizeof(int64_t) * (size_t) (plan->chapter_count > 0 ? plan->chapter_count : 1));
     if (reader->buffer == NULL || reader->chapter_starts == NULL) goto memory;
     for (int i = 0; i < plan->chapter_count; i++) reader->chapter_starts[i] = -1;
-    reader->file = DVDOpenFile(dvd, plan->title_set, DVD_READ_TITLE_VOBS);
-    if (reader->file == NULL) {
+    reader->vobs = dr_vobs_open(dvd, plan->title_set, cancelled, opaque);
+    if (reader->vobs == NULL) {
         dr_set_error(error, error_size, "cannot open the VOB files of title set %d", plan->title_set);
         dr_reader_close(reader);
         return NULL;
@@ -338,7 +338,7 @@ int dr_reader_bad_ranges(const dr_reader *reader, const dr_bad_range **ranges) {
 
 void dr_reader_close(dr_reader *reader) {
     if (reader == NULL) return;
-    if (reader->file != NULL) DVDCloseFile(reader->file);
+    dr_vobs_close(reader->vobs);
     free(reader->buffer);
     free(reader->timeline);
     free(reader->chapter_starts);

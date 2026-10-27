@@ -771,7 +771,7 @@ static char *read_failure(rip *r, int result) {
     return failure(r->read_status != 0 ? "unreadable" : "failed", message);
 }
 
-char *dr_rip(dvd_reader_t *dvd, const dr_rip_options *options, const dr_rip_hooks *hooks, const dr_logger *logger) {
+char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hooks, const dr_logger *logger) {
     rip *r = calloc(1, sizeof(rip));
     if (r == NULL) return failure("failed", "out of memory");
     r->options = options;
@@ -782,12 +782,12 @@ char *dr_rip(dvd_reader_t *dvd, const dr_rip_options *options, const dr_rip_hook
     char *report = NULL;
     int result;
 
-    ifo_handle_t *vmg = ifoOpen(dvd, 0);
+    ifo_handle_t *vmg = ifoOpen(dr_dvd_reader(dvd), 0);
     if (vmg == NULL) {
         report = failure("unreadable", "Cannot read VIDEO_TS.IFO");
         goto done;
     }
-    result = dr_plan_build(dvd, vmg, options->title, options->angle, &r->plan, error, sizeof(error));
+    result = dr_plan_build(dr_dvd_reader(dvd), vmg, options->title, options->angle, &r->plan, error, sizeof(error));
     ifoClose(vmg);
     if (result < 0) {
         report = failure("no_title", error);

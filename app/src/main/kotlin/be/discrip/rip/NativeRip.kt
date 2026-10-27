@@ -11,8 +11,8 @@ internal object NativeRip {
         System.loadLibrary("discrip")
     }
 
-    /** Sets up libdvdcss: title keys recovered from the disc and cached in [cacheDir]. */
-    @JvmStatic external fun configure(cacheDir: ByteArray)
+    /** Sets up libdvdcss: title keys cracked from the scrambled sectors, no key cache on disk. */
+    @JvmStatic external fun configure()
 
     /** Opens the image on [fd], which native code owns from here on; 0 with [error] set on failure. */
     @JvmStatic external fun openImage(fd: Int, error: Array<ByteArray?>): Long

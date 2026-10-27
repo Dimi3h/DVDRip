@@ -60,7 +60,6 @@ class AppContainer(context: Context) {
     val rips: RipManager by lazy {
         RipManager(
             resolver = appContext.contentResolver,
-            cacheDir = appContext.cacheDir,
             labels = RipLabels(appContext),
             scope = applicationScope,
             stagingDir = stagingDir,

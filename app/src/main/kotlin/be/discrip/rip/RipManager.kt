@@ -219,7 +219,6 @@ data class Retry(val recordId: String, val stage: RipStage, val progress: Transf
  */
 class RipManager(
     private val resolver: ContentResolver,
-    private val cacheDir: File,
     private val labels: RipLabels,
     private val scope: CoroutineScope,
     /** NAS rips wait here until they are uploaded. */
@@ -267,7 +266,7 @@ class RipManager(
         }
         sourceState.value = SourceState.Opening(dvd)
         scope.launch(engine) {
-            DvdSession.configure(cacheDir)
+            DvdSession.configure()
             closeSession()
             sourceState.value = try {
                 val (opened, name) = when (dvd) {

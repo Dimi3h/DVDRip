@@ -17,6 +17,7 @@ object ScsiCommands {
     const val READ_10 = 0x28
     const val GET_CONFIGURATION = 0x46
     const val GET_EVENT_STATUS_NOTIFICATION = 0x4A
+    const val SEND_KEY = 0xA3
     const val REPORT_KEY = 0xA4
     const val READ_12 = 0xA8
     const val READ_DVD_STRUCTURE = 0xAD
@@ -26,6 +27,17 @@ object ScsiCommands {
 
     /** READ DVD STRUCTURE format for copyright information (CPST and region mask). */
     const val DVD_STRUCTURE_COPYRIGHT = 0x01
+
+    /** READ DVD STRUCTURE format for the disc key, encrypted with the bus key (needs an AGID). */
+    const val DVD_STRUCTURE_DISC_KEY = 0x02
+
+    /** REPORT KEY and SEND KEY formats of CSS authentication (MMC-6, 6.29 and 6.39). */
+    const val KEY_FORMAT_AGID = 0x00
+    const val KEY_FORMAT_CHALLENGE = 0x01
+    const val KEY_FORMAT_KEY1 = 0x02
+    const val KEY_FORMAT_KEY2 = 0x03
+    const val KEY_FORMAT_ASF = 0x05
+    const val KEY_FORMAT_INVALIDATE_AGID = 0x3F
 
     /** REPORT KEY format for the drive's regional playback control state. */
     const val KEY_FORMAT_RPC_STATE = 0x08
@@ -109,6 +121,15 @@ object ScsiCommands {
         cdb[7] = format.toByte()
         Bytes.putShortBe(cdb, 8, allocationLength)
         cdb[10] = ((agid and 0x03) shl 6).toByte()
+        return cdb
+    }
+
+    /** SEND KEY for the CSS/CPPM key class; [parameterLength] bytes follow in the data-out phase. */
+    fun sendKey(keyFormat: Int, parameterLength: Int, agid: Int = 0): ByteArray {
+        val cdb = ByteArray(12)
+        cdb[0] = SEND_KEY.toByte()
+        Bytes.putShortBe(cdb, 8, parameterLength)
+        cdb[10] = (((agid and 0x03) shl 6) or (keyFormat and 0x3F)).toByte()
         return cdb
     }
 

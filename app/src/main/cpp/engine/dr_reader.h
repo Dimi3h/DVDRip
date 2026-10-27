@@ -4,15 +4,14 @@
  * and ends. Where the next VOBU does not start where the previous one ended (a new VOB with its
  * own clock, a seamless branch), the reader records an offset that lines the timestamps up again.
  * Where a bulk read fails, blocks are read one at a time, each up to DR_READ_RETRIES times;
- * blocks that stay unreadable are skipped and reported. CSS-scrambled blocks that libdvdcss could
- * not decrypt stop the title.
+ * blocks that stay unreadable are skipped and reported. CSS-scrambled blocks that could not be
+ * decrypted stop the title.
  */
 #ifndef DR_READER_H
 #define DR_READER_H
 
 #include "dr_plan.h"
-
-#include <dvdread/dvd_reader.h>
+#include "dr_source.h"
 
 #define DR_READ_RETRIES 3
 
@@ -30,7 +29,7 @@ typedef struct dr_bad_range {
 
 typedef struct dr_reader dr_reader;
 
-dr_reader *dr_reader_open(dvd_reader_t *dvd, const dr_plan *plan, const dr_logger *logger,
+dr_reader *dr_reader_open(dr_dvd *dvd, const dr_plan *plan, const dr_logger *logger,
                           int (*cancelled)(void *opaque), void *opaque, char *error, size_t error_size);
 
 /* Fills buffer with up to size bytes; returns the count, or one of the DR_READ_ codes. */

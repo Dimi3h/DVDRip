@@ -356,12 +356,10 @@ static dr_file java_file_as_file(java_file *f) {
 /* --- Entry points ----------------------------------------------------------------------------- */
 
 JNIEXPORT void JNICALL
-Java_be_discrip_rip_NativeRip_configure(JNIEnv *env, jclass clazz, jbyteArray cache_dir) {
+Java_be_discrip_rip_NativeRip_configure(JNIEnv *env, jclass clazz) {
     (void) clazz;
     (*env)->GetJavaVM(env, &java_vm);
-    char *path = text_of(env, cache_dir);
-    dr_css_configure(path);
-    free(path);
+    dr_css_configure();
 }
 
 /* Opens an image on fd, which the session then owns (closed also on failure). */
@@ -577,7 +575,7 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
         };
         rip_call call = {env, listener, on_progress_id, s};
         dr_rip_hooks hooks = {&call, on_progress, is_cancelled};
-        report = dr_rip(dr_dvd_reader(s->dvd), &options, &hooks, &logger);
+        report = dr_rip(s->dvd, &options, &hooks, &logger);
     }
 
     if (output_file != NULL) java_file_release(&output);

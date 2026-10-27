@@ -224,7 +224,7 @@ int main(int argc, char **argv) {
         free(json);
         return ok ? 0 : 1;
     }
-    dr_css_configure(getenv("TMPDIR") != NULL ? getenv("TMPDIR") : "/tmp");
+    dr_css_configure();
     int next = 2;
     dr_dvd *dvd = open_source(argc, argv, &next);
     if (dvd == NULL) return 1;
@@ -328,7 +328,7 @@ int main(int argc, char **argv) {
             status = 1;
         } else {
             dr_rip_hooks hooks = {&source_image, on_progress, cancelled};
-            char *report = dr_rip(dr_dvd_reader(dvd), &options, &hooks, &logger);
+            char *report = dr_rip(dvd, &options, &hooks, &logger);
             printf("%s\n", report);
             for (uint64_t b = 0; b < source_image.bad_count; b++) {
                 fprintf(stderr, "bad block %llu read %d times\n", (unsigned long long) (source_image.bad_first + b),

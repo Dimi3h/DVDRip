@@ -64,7 +64,6 @@ class RipTestRig(name: String) : Closeable {
         image = DvdSource.Image(Uri.fromFile(iso))
         manager = RipManager(
             resolver = target.contentResolver,
-            cacheDir = target.cacheDir,
             labels = RipLabels(target),
             scope = scope,
             stagingDir = staging,

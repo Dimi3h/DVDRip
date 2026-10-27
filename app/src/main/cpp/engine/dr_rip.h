@@ -9,6 +9,7 @@
 
 #include "dr_common.h"
 #include "dr_file.h"
+#include "dr_source.h"
 
 #include <dvdread/dvd_reader.h>
 
@@ -86,6 +87,6 @@ typedef struct dr_rip_hooks {
  *    "audioTracks":…,"subtitleTracks":…,"warnings":[…]}
  *   {"ok":false,"error":"cancelled|no_title|unreadable|scrambled|no_video|no_space|write_failed|failed","message":"…"}
  */
-char *dr_rip(dvd_reader_t *dvd, const dr_rip_options *options, const dr_rip_hooks *hooks, const dr_logger *logger);
+char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hooks, const dr_logger *logger);
 
 #endif

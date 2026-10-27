@@ -2,7 +2,8 @@
 """End-to-end tests of the rip engine on the build machine.
 
 Runs discrip_host against the image made by native/scripts/make-test-dvd.sh and checks the
-Matroska files with ffprobe and ffmpeg.
+Matroska files with ffprobe and ffmpeg. css_tool, built next to discrip_host, makes CSS-scrambled
+copies of the image.
 
     DISCRIP_HOST=native/build/host/discrip_host TEST_ISO=test.iso TEST_FOLDER=folder \
         python3 native/tests/test_engine.py
@@ -11,13 +12,16 @@ import array
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
 
 HOST = os.environ.get("DISCRIP_HOST", "native/build/host/discrip_host")
+CSS_TOOL = os.environ.get("CSS_TOOL", os.path.join(os.path.dirname(HOST), "css_tool"))
 ISO = os.environ["TEST_ISO"]
 FOLDER = os.environ["TEST_FOLDER"]
+TITLE_KEY = "0123456789"
 
 
 def run_host(*args, check=True):
@@ -33,12 +37,49 @@ def host(*args, check=True):
 
 def extent(iso, name):
     """First block of a file in the image, from isoinfo's listing."""
+    return file_blocks(iso, name)[0]
+
+
+def file_blocks(iso, name):
+    """First block and length in blocks of a file in the image, from isoinfo's listing."""
     listing = subprocess.run(["isoinfo", "-l", "-i", iso], capture_output=True, text=True, check=True).stdout
     for line in listing.splitlines():
-        match = re.search(r"\[\s*(\d+)\s+\d+\]\s+(\S+?);1", line)
-        if match and match.group(2) == name:
-            return int(match.group(1))
+        match = re.search(r"(\d+) \w{3} [ \d]\d \d{4} \[\s*(\d+)\s+\d+\]\s+(\S+?);1", line)
+        if match and match.group(3) == name:
+            return int(match.group(2)), (int(match.group(1)) + 2047) // 2048
     raise AssertionError(f"{name} not in {iso}")
+
+
+def attackable_blocks(iso, name, at_least=4):
+    """
+    Blocks of a VOB, counted from its start, that libdvdcss's title key attack (AttackPattern in
+    css.c) tries once they are scrambled: their clear bytes end in a pattern that repeats at least
+    twice. It guesses the scrambled bytes continue it; the longer the pattern, the safer the guess.
+    """
+    first, blocks = file_blocks(iso, name)
+    found = []
+    with open(iso, "rb") as image:
+        image.seek(first * 2048)
+        for block in range(blocks):
+            p = image.read(2048)
+            if p[:4] != b"\x00\x00\x01\xba" or p[0x0e:0x11] != b"\x00\x00\x01" or p[0x11] in (0xbb, 0xbe, 0xbf):
+                continue
+            best_length = best_cycle = 0
+            for cycle in range(2, 0x30):
+                j = cycle + 1
+                while j < 0x80 and p[0x7f - (j % cycle)] == p[0x7f - j]:
+                    if j > best_length:
+                        best_length, best_cycle = j, cycle
+                    j += 1
+            if best_length > 3 and best_length // best_cycle >= 2 and best_length >= at_least:
+                found.append(block)
+    return found
+
+
+def frames(path):
+    """A checksum line per packet of every stream, to tell whether two rips hold the same data."""
+    return subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", "0", "-c", "copy", "-f", "framemd5", "-"],
+                          capture_output=True, text=True, check=True).stdout
 
 
 def probe(path, entries):
@@ -81,6 +122,17 @@ class EngineTest(unittest.TestCase):
 
     def output(self, name):
         return os.path.join(self.directory.name, name)
+
+    def scrambled(self, ranges, *options):
+        """A copy of the image with the packs in ranges of VTS_01_1.VOB (from its start) scrambled."""
+        path = self.output("css.iso")
+        shutil.copyfile(ISO, path)
+        vob = extent(ISO, "VTS_01_1.VOB")
+        blocks = [f"{vob + first}:{count}" for first, count in ranges]
+        result = subprocess.run([CSS_TOOL, "scramble", *options, path, TITLE_KEY, *blocks],
+                                capture_output=True, text=True, check=True)
+        self.assertGreater(int(result.stdout.split()[0]), 0)
+        return path
 
     def test_titles_from_image_and_folder_agree(self):
         image = host("titles", ISO)["titles"]
@@ -251,6 +303,65 @@ class EngineTest(unittest.TestCase):
         report = host("rip", ISO, "2", self.output("nosubs.mkv"), "--subs", "0x20:dut")
         self.assertEqual(0, report["subtitleTracks"])
         self.assertEqual(["Subtitle stream 0x20 is not in this title; skipped"], report["warnings"])
+
+    def test_a_css_scrambled_image_rips_like_the_clear_one(self):
+        _, blocks = file_blocks(ISO, "VTS_01_1.VOB")
+        image = self.scrambled([(0, blocks)])
+        arguments = ["--audio", "0x80:eng,0xa0:dut", "--subs", "0x20:dut"]
+        clear = self.output("clear.mkv")
+        host("rip", ISO, "1", clear, *arguments)
+        decrypted = self.output("decrypted.mkv")
+        report, log = run_host("rip", image, "1", decrypted, *arguments)
+        self.assertTrue(report["ok"])
+        self.assertIn("CSS title key found", log)
+        self.assertEqual(frames(clear), frames(decrypted))
+
+    def test_scrambling_that_starts_inside_the_title_is_decrypted_from_there(self):
+        _, blocks = file_blocks(ISO, "VTS_01_1.VOB")
+        later = [b for b in attackable_blocks(ISO, "VTS_01_1.VOB", at_least=20) if b > blocks // 2]
+        self.assertTrue(later, "the test DVD has no block in its second half that the title key attack can use")
+        start = later[0] - 100
+        image = self.scrambled([(start, blocks - start)])
+        clear = self.output("clear.mkv")
+        host("rip", ISO, "1", clear, "--audio", "0x80,0xa0")
+        decrypted = self.output("decrypted.mkv")
+        report, log = run_host("rip", image, "1", decrypted, "--audio", "0x80,0xa0")
+        self.assertTrue(report["ok"])
+        # The blocks before were read as they are; the search starts at the first scrambled one.
+        searches = [int(b) for b in re.findall(r"Recovering the CSS title key from block (\d+) on", log)]
+        vob = extent(ISO, "VTS_01_1.VOB")
+        self.assertEqual(1, len(searches))
+        self.assertTrue(vob + start <= searches[0] < vob + start + 4, searches)
+        self.assertEqual(frames(clear), frames(decrypted))
+
+    def test_a_title_whose_key_cannot_be_recovered_is_refused(self):
+        _, blocks = file_blocks(ISO, "VTS_01_1.VOB")
+        image = self.scrambled([(0, blocks)], "--no-pattern")
+        report, log = run_host("rip", image, "1", self.output("refused.mkv"), "--audio", "0x80", check=False)
+        self.assertEqual("scrambled", report["error"])
+        self.assertIn("No CSS title key found", log)
+
+    def test_the_search_for_a_key_goes_on_past_unreadable_blocks(self):
+        _, blocks = file_blocks(ISO, "VTS_01_1.VOB")
+        attackable = attackable_blocks(ISO, "VTS_01_1.VOB")
+        self.assertTrue(attackable and attackable[0] > 10, attackable)
+        image = self.scrambled([(0, blocks)])
+        vob = extent(ISO, "VTS_01_1.VOB")
+        # Before the first block the attack can use, so the search runs into them.
+        bad = attackable[0] // 2
+        report, log = run_host("rip", image, "1", self.output("bad.mkv"), "--audio", "0x80", "--bad-blocks", f"{vob + bad}:2")
+        self.assertTrue(report["ok"])
+        self.assertEqual([[bad, 2]], report["badSectors"])
+        self.assertIn(f"Recovering the CSS title key from block {vob + bad + 2} on", log)
+        self.assertIn("CSS title key found", log)
+        # Twice by the search (libdvdcss tries once more), then once in bulk and three times alone by the rip.
+        self.assertEqual(["6", "6"], re.findall(r"bad block \d+ read (\d+) times", log))
+
+    def test_the_search_for_a_key_can_be_cancelled(self):
+        _, blocks = file_blocks(ISO, "VTS_01_1.VOB")
+        image = self.scrambled([(0, blocks)], "--no-pattern")
+        report = host("rip", image, "1", self.output("cancel.mkv"), "--audio", "0x80", "--cancel-after", str(blocks // 2), check=False)
+        self.assertEqual("cancelled", report["error"])
 
     def test_missing_title(self):
         report = host("rip", ISO, "9", self.output("missing.mkv"), check=False)

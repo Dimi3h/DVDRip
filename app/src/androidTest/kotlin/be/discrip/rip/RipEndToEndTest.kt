@@ -124,7 +124,7 @@ class RipEndToEndTest {
     fun theEngineStopsWhenCancelledMidRip() = runBlocking {
         manager.close(image)?.join()
         val iso = ParcelFileDescriptor.open(File(work, "test-dvd.iso"), ParcelFileDescriptor.MODE_READ_ONLY)
-        DvdSession.configure(target.cacheDir)
+        DvdSession.configure()
         DvdSession.openImage(iso).use { session ->
             val title = MainFeature.choose(session.titles())!!
             val output = File(work, "cancelled.mkv")

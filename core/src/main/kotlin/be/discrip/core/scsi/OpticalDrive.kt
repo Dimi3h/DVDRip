@@ -125,6 +125,68 @@ class OpticalDrive(private val bot: BulkOnlyTransport) : AutoCloseable {
         }
     }
 
+    // CSS authentication (MMC-6, 4.10.4); CssAuthentication drives the sequence.
+
+    /** Asks for an authentication grant ID; fails while all four are in use. */
+    fun reportAgid(): Int {
+        val buffer = ByteArray(8)
+        send(ScsiCommands.reportKey(ScsiCommands.KEY_FORMAT_AGID, buffer.size), DataDirection.IN, buffer, length = buffer.size)
+        return (buffer[7].toInt() and 0xFF) ushr 6
+    }
+
+    fun invalidateAgid(agid: Int) {
+        send(ScsiCommands.reportKey(ScsiCommands.KEY_FORMAT_INVALIDATE_AGID, 0, agid))
+    }
+
+    /** Sends the host's 10-byte challenge, in the byte order the drive reads it. */
+    fun sendChallenge(agid: Int, challenge: ByteArray) {
+        val parameters = ByteArray(16)
+        parameters[1] = 0x0E
+        challenge.copyInto(parameters, 4, 0, 10)
+        send(ScsiCommands.sendKey(ScsiCommands.KEY_FORMAT_CHALLENGE, parameters.size, agid), DataDirection.OUT, parameters, length = parameters.size)
+    }
+
+    /** The drive's answer to the host's challenge: 5 bytes. */
+    fun reportKey1(agid: Int): ByteArray {
+        val buffer = ByteArray(12)
+        send(ScsiCommands.reportKey(ScsiCommands.KEY_FORMAT_KEY1, buffer.size, agid), DataDirection.IN, buffer, length = buffer.size)
+        return buffer.copyOfRange(4, 9)
+    }
+
+    /** The drive's own 10-byte challenge. */
+    fun reportChallenge(agid: Int): ByteArray {
+        val buffer = ByteArray(16)
+        send(ScsiCommands.reportKey(ScsiCommands.KEY_FORMAT_CHALLENGE, buffer.size, agid), DataDirection.IN, buffer, length = buffer.size)
+        return buffer.copyOfRange(4, 14)
+    }
+
+    /** Sends the host's answer to the drive's challenge: 5 bytes. */
+    fun sendKey2(agid: Int, key: ByteArray) {
+        val parameters = ByteArray(12)
+        parameters[1] = 0x0A
+        key.copyInto(parameters, 4, 0, 5)
+        send(ScsiCommands.sendKey(ScsiCommands.KEY_FORMAT_KEY2, parameters.size, agid), DataDirection.OUT, parameters, length = parameters.size)
+    }
+
+    /** The disc key block (2048 bytes) under the bus key of an authenticated [agid]. */
+    fun readDiscKey(agid: Int): ByteArray {
+        val buffer = ByteArray(DISC_KEY_SIZE + 4)
+        send(
+            ScsiCommands.readDvdStructure(ScsiCommands.DVD_STRUCTURE_DISC_KEY, allocationLength = buffer.size, agid = agid),
+            DataDirection.IN,
+            buffer,
+            length = buffer.size,
+        )
+        return buffer.copyOfRange(4, buffer.size)
+    }
+
+    /** The authentication success flag: set, the drive hands out the disc's scrambled sectors. */
+    fun authenticationSucceeded(): Boolean {
+        val buffer = ByteArray(8)
+        send(ScsiCommands.reportKey(ScsiCommands.KEY_FORMAT_ASF, buffer.size), DataDirection.IN, buffer, length = buffer.size)
+        return buffer[7].toInt() and 0x01 != 0
+    }
+
     fun setRemovalPrevented(prevent: Boolean) {
         send(ScsiCommands.preventAllowMediumRemoval(prevent))
     }
@@ -195,6 +257,7 @@ class OpticalDrive(private val bot: BulkOnlyTransport) : AutoCloseable {
 
     companion object {
         const val BLOCK_SIZE = 2048
+        const val DISC_KEY_SIZE = 2048
 
         /** 32 blocks = 64 KiB per READ(10): large enough for throughput, small enough to retry. */
         const val MAX_BLOCKS_PER_READ = 32

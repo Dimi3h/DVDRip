@@ -8,7 +8,6 @@ import be.discrip.core.dvd.MkvSummary
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.dvd.RipOutcome
 import java.io.Closeable
-import java.io.File
 
 /** One audio or subtitle track of a rip, in output order. */
 data class RipTrack(
@@ -128,13 +127,12 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
         @Volatile
         private var configured = false
 
-        /** Points libdvdcss at its key cache; done once, before the first session. */
-        fun configure(cacheDir: File) {
+        /** Sets up libdvdcss; done once, before the first session. */
+        fun configure() {
             if (configured) return
             synchronized(this) {
                 if (configured) return
-                File(cacheDir, "dvdcss").mkdirs()
-                NativeRip.configure(File(cacheDir, "dvdcss").path.encodeToByteArray())
+                NativeRip.configure()
                 configured = true
             }
         }
