@@ -1,9 +1,9 @@
 /*
  * JNI bridge between be.discrip.rip.NativeRip and the rip engine.
  *
- * A session is one open DVD: an image read with pread() on a descriptor Kotlin hands over, or a
- * VIDEO_TS folder reached through a Kotlin NativeFolder (stat, list, open) whose files are then
- * read here, on the descriptors it opens. The MKV goes to a descriptor, or through a Kotlin
+ * A session is one open DVD: an image read with pread() on a descriptor Kotlin hands over, the disc
+ * in a USB drive read through a Kotlin NativeBlocks, or a VIDEO_TS folder reached through a Kotlin
+ * NativeFolder (stat, list, open) whose files are then read here, on the descriptors it opens. The MKV goes to a descriptor, or through a Kotlin
  * NativeFile (the NAS). Text crosses the boundary as UTF-8 byte arrays because JNI's own string
  * functions use modified UTF-8.
  *
@@ -31,9 +31,12 @@
 #define STAT_MISSING (-1)
 #define STAT_DIRECTORY (-2)
 
+typedef struct java_blocks java_blocks;
+
 typedef struct session {
     dr_dvd *dvd;
-    dr_fd_image image; /* fd -1 for a folder */
+    dr_fd_image image; /* fd -1 for a folder or a drive */
+    java_blocks *blocks; /* a drive */
     atomic_int cancel;
 } session;
 
@@ -281,6 +284,46 @@ static dvd_reader_filesystem_h *folder_filesystem(JNIEnv *env, jobject target) {
     return fs;
 }
 
+/* --- A disc through Kotlin (NativeBlocks): the disc in a USB drive ----------------------------- */
+
+struct java_blocks {
+    jobject target; /* global reference to the NativeBlocks */
+    jmethodID read;
+    /* Carries the blocks; a global reference, kept between calls and grown as needed. */
+    jbyteArray buffer;
+    jsize capacity;
+};
+
+static int java_blocks_read(void *opaque, uint64_t lba, int count, uint8_t *out) {
+    java_blocks *b = opaque;
+    JNIEnv *env = current_env();
+    if (env == NULL || count < 0 || count > INT32_MAX / DR_BLOCK_SIZE) return -1;
+    jsize size = count * DR_BLOCK_SIZE;
+    if (b->capacity < size) {
+        jbyteArray local = (*env)->NewByteArray(env, size);
+        jbyteArray grown = local != NULL ? (*env)->NewGlobalRef(env, local) : NULL;
+        if (local != NULL) (*env)->DeleteLocalRef(env, local);
+        if (grown == NULL) {
+            failed_call(env);
+            return -1;
+        }
+        if (b->buffer != NULL) (*env)->DeleteGlobalRef(env, b->buffer);
+        b->buffer = grown;
+        b->capacity = size;
+    }
+    jint got = (*env)->CallIntMethod(env, b->target, b->read, (jlong) lba, (jint) count, b->buffer);
+    if (failed_call(env) || got < 0 || got > count) return -1;
+    if (got > 0) (*env)->GetByteArrayRegion(env, b->buffer, 0, got * DR_BLOCK_SIZE, (jbyte *) out);
+    return got;
+}
+
+static void java_blocks_free(JNIEnv *env, java_blocks *b) {
+    if (b == NULL) return;
+    if (b->buffer != NULL) (*env)->DeleteGlobalRef(env, b->buffer);
+    if (b->target != NULL) (*env)->DeleteGlobalRef(env, b->target);
+    free(b);
+}
+
 /* --- Files through Kotlin (NativeFile), such as the MKV on the NAS -------------------------------- */
 
 typedef struct java_file {
@@ -381,6 +424,35 @@ Java_be_discrip_rip_NativeRip_openImage(JNIEnv *env, jclass clazz, jint fd, jobj
     }
     free(s);
     close(fd);
+    release_slot();
+    set_error(env, error, message);
+    return 0;
+}
+
+/* Opens the disc that target (a NativeBlocks) reads. */
+JNIEXPORT jlong JNICALL
+Java_be_discrip_rip_NativeRip_openBlocks(JNIEnv *env, jclass clazz, jobject target, jobjectArray error) {
+    (void) clazz;
+    if (!claim_slot(env, error)) return 0;
+    (*env)->GetJavaVM(env, &java_vm);
+    char message[256] = "out of memory";
+    session *s = new_session();
+    java_blocks *b = s != NULL ? calloc(1, sizeof(java_blocks)) : NULL;
+    if (b != NULL) {
+        jclass type = (*env)->GetObjectClass(env, target);
+        b->read = (*env)->GetMethodID(env, type, "read", "(JI[B)I");
+        (*env)->DeleteLocalRef(env, type);
+        b->target = b->read != NULL ? (*env)->NewGlobalRef(env, target) : NULL;
+        if (b->target == NULL) failed_call(env);
+    }
+    if (b != NULL && b->target != NULL) {
+        s->blocks = b;
+        dr_block_source source = {b, java_blocks_read};
+        s->dvd = dr_dvd_open_blocks(&source, &logger, message, sizeof(message));
+        if (s->dvd != NULL) return (jlong) (intptr_t) s;
+    }
+    java_blocks_free(env, b);
+    free(s);
     release_slot();
     set_error(env, error, message);
     return 0;
@@ -601,12 +673,12 @@ Java_be_discrip_rip_NativeRip_cancel(JNIEnv *env, jclass clazz, jlong handle) {
 
 JNIEXPORT void JNICALL
 Java_be_discrip_rip_NativeRip_close(JNIEnv *env, jclass clazz, jlong handle) {
-    (void) env;
     (void) clazz;
     session *s = session_of(handle);
     if (s == NULL) return;
     dr_dvd_close(s->dvd);
     if (s->image.fd >= 0) close(s->image.fd);
+    java_blocks_free(env, s->blocks);
     free(s);
     release_slot();
 }

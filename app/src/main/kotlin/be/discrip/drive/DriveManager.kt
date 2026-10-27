@@ -11,13 +11,18 @@ import android.hardware.usb.UsbManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import be.discrip.core.disc.DiscInfo
+import be.discrip.core.disc.DiscState
 import be.discrip.core.disc.DriveMonitor
+import be.discrip.core.disc.DriveProblem
+import be.discrip.core.disc.DriveReader
 import be.discrip.core.disc.DriveUnresponsiveException
 import be.discrip.core.scsi.InquiryData
 import be.discrip.core.scsi.OpticalDrive
 import be.discrip.core.usb.BulkOnlyTransport
 import be.discrip.core.usb.TransferFailure
 import be.discrip.core.usb.UsbTransferException
+import be.discrip.rip.DriveDisc
 import be.discrip.usb.AndroidBulkTransport
 import be.discrip.usb.LibusbTransport
 import be.discrip.usb.MassStorageInterface
@@ -35,15 +40,18 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 
 /**
  * Finds the USB DVD drive, asks for permission, claims it and follows the disc in it.
  *
  * Everything that touches the device runs on one thread, so commands never interleave and the
- * state below needs no locks. Claiming detaches the kernel's own driver (force = true), which for
- * a USB stick means Android unmounts it; DiscRip therefore only claims a device after the user
- * granted it permission and lets go at once when INQUIRY shows it is not a CD/DVD drive.
+ * state below needs no locks; the rip engine's reads hop onto it too ([lease]). Claiming detaches
+ * the kernel's own driver (force = true), which for a USB stick means Android unmounts it; DiscRip
+ * therefore only claims a device after the user granted it permission and lets go at once when
+ * INQUIRY shows it is not a CD/DVD drive.
  */
 class DriveManager(context: Context, private val scope: CoroutineScope) {
 
@@ -51,7 +59,10 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
     private val usbManager = this.context.getSystemService(UsbManager::class.java)
     private val hasUsbHost = this.context.packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST) && usbManager != null
     private val nonOptical = NonOpticalDevices(this.context)
-    private val dispatcher = Executors.newSingleThreadExecutor { Thread(it, "usb-drive") }.asCoroutineDispatcher()
+    @Volatile
+    private var driveThread: Thread? = null
+    private val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "usb-drive").also { driveThread = it } }
+    private val dispatcher = executor.asCoroutineDispatcher()
 
     private val statusState = MutableStateFlow<DriveStatus>(if (hasUsbHost) DriveStatus.NoDrive else DriveStatus.UsbHostUnsupported)
     val status: StateFlow<DriveStatus> = statusState.asStateFlow()
@@ -61,6 +72,7 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
 
     // Confined to the drive thread.
     private var open: OpenDrive? = null
+    private var lease: Lease? = null
     private val denied = mutableSetOf<String>()
 
     /** Devices of this session that are not optical drives, by usbfs path. */
@@ -129,6 +141,7 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
 
     fun eject() = onDrive {
         val drive = open ?: return@onDrive
+        if (lease != null) return@onDrive
         try {
             drive.monitor.eject()
             publish(drive)
@@ -141,6 +154,7 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
     /** Closes the tray; many slim USB drives cannot, and the user is told to push it in. */
     fun closeTray() = onDrive {
         val drive = open ?: return@onDrive
+        if (lease != null) return@onDrive
         try {
             drive.drive.load()
         } catch (e: IOException) {
@@ -152,12 +166,104 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
 
     /** Reads the disc again after it could not be used. */
     fun retryDisc() = onDrive {
+        if (lease != null) return@onDrive
         open?.monitor?.invalidate()
         poll()
     }
 
+    /**
+     * Lends the disc [insertion] ([DiscState.Ready.insertion]) to the rip engine, or null when
+     * that disc is no longer in the drive or is lent already. Until the loan is closed the drive is
+     * not polled, so the engine's reads see every medium change themselves. Blocks.
+     */
+    fun lease(insertion: Long): DriveDisc? = onDriveBlocking {
+        val drive = open ?: return@onDriveBlocking null
+        val ready = drive.monitor.state as? DiscState.Ready
+        if (ready == null || ready.insertion != insertion || lease != null) return@onDriveBlocking null
+        val reader = try {
+            DriveReader.open(drive.drive, ready.disc.blockCount)
+        } catch (e: IOException) {
+            Log.w(TAG, "The disc cannot be read", e)
+            return@onDriveBlocking null
+        }
+        Lease(drive, ready.disc, reader).also {
+            lease = it
+            publish(drive)
+        }
+    }
+
     private fun onDrive(block: () -> Unit) {
         scope.launch(dispatcher) { block() }
+    }
+
+    /** Runs [block] on the drive thread and waits for it; exceptions come back as they are. */
+    private fun <T> onDriveBlocking(block: () -> T): T {
+        if (Thread.currentThread() === driveThread) return block()
+        try {
+            return executor.submit(Callable { block() }).get()
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
+        }
+    }
+
+    /** A disc lent to the rip engine; see [lease]. */
+    private inner class Lease(
+        private val owner: OpenDrive,
+        override val info: DiscInfo,
+        private val reader: DriveReader,
+    ) : DriveDisc {
+
+        /** The drive went away under the loan (unplugged, or given up on). */
+        @Volatile
+        var gone = false
+
+        @Volatile
+        private var closed = false
+
+        override val problem: DriveProblem?
+            get() = if (gone) DriveProblem.DISCONNECTED else reader.problem
+
+        override fun read(lba: Long, count: Int, buffer: ByteArray): Int {
+            if (gone || closed) return DriveReader.FAILED
+            return onDriveBlocking { if (gone) DriveReader.FAILED else reader.read(lba, count, buffer) }
+        }
+
+        override fun unlock() = onDriveBlocking {
+            if (gone) throw UsbTransferException(TransferFailure.DISCONNECTED, "The drive is gone")
+            reader.unlock()
+        }
+
+        override fun preventRemoval(prevent: Boolean) = onDriveBlocking {
+            if (gone) return@onDriveBlocking
+            try {
+                owner.drive.setRemovalPrevented(prevent)
+            } catch (e: IOException) {
+                Log.w(TAG, "Locking the tray failed", e)
+            }
+        }
+
+        override fun eject(): Boolean = onDriveBlocking {
+            if (gone) return@onDriveBlocking false
+            try {
+                owner.monitor.eject()
+                true
+            } catch (e: IOException) {
+                Log.w(TAG, "Eject failed", e)
+                false
+            }
+        }
+
+        override fun close() = onDriveBlocking {
+            if (closed) return@onDriveBlocking
+            closed = true
+            if (lease !== this) return@onDriveBlocking
+            lease = null
+            // The reads took the unit attention of a disc change (or reset) the monitor would have
+            // seen: it reads the drive afresh. Otherwise the disc stays the one it knows.
+            if (reader.problem != null || reader.attentions > 0) owner.monitor.invalidate()
+            publish(owner)
+            poll()
+        }
     }
 
     /**
@@ -267,6 +373,8 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
             transport = transport.kind,
             libusbVersion = if (transport.kind == TransportKind.LIBUSB) LibusbTransport.version else null,
         )
+        // A tray an earlier run left locked (it ended mid-rip) opens again.
+        runCatching { found.drive.setRemovalPrevented(false) }
         val drive = OpenDrive(device.deviceName, transport, found.drive, DriveMonitor(found.drive), info)
         open = drive
         publish(drive)
@@ -290,6 +398,7 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
 
     private fun poll() {
         val drive = open ?: return
+        if (lease != null) return
         try {
             drive.monitor.poll()
             publish(drive)
@@ -305,7 +414,7 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
     }
 
     private fun publish(drive: OpenDrive) {
-        statusState.value = DriveStatus.Connected(drive.info, drive.monitor.state)
+        statusState.value = DriveStatus.Connected(drive.info, drive.monitor.state, inUse = lease != null)
     }
 
     private fun detached(deviceName: String?) {
@@ -318,6 +427,8 @@ class DriveManager(context: Context, private val scope: CoroutineScope) {
     private fun close() {
         val drive = open ?: return
         open = null
+        lease?.gone = true
+        lease = null
         runCatching { drive.transport.close() }
     }
 

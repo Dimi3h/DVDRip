@@ -215,6 +215,8 @@
     <string name="disc_region_mismatch_footer">Het station staat op regio %1$s en deze disc is voor regio %2$s. Stel het station op een pc in op regio %3$s, in Windows bijvoorbeeld via Apparaatbeheer › dvd-station › Eigenschappen › Dvd-regio. Een station staat maar enkele wijzigingen toe.</string>
     <string name="disc_region_not_set_footer">Het station heeft nog geen regio en weigert daarom beveiligde dvd\'s. Stel het op een pc in op regio %1$s, in Windows bijvoorbeeld via Apparaatbeheer › dvd-station › Eigenschappen › Dvd-regio.</string>
     <string name="disc_metadata">Metadata voor deze disc</string>
+    <string name="disc_rip">Rippen</string>
+    <string name="disc_in_use">In gebruik voor het rippen</string>
     <string name="disc_eject">Uitwerpen</string>
     <string name="disc_not_dvd_video_footer">Deze disc heeft geen VIDEO_TS-map en is dus geen video-dvd.</string>
     <string name="disc_wrong_medium_title">Geen dvd</string>
@@ -238,7 +240,8 @@
     <string name="home_open_iso">ISO-bestand</string>
     <string name="home_open_folder">VIDEO_TS-map</string>
     <string name="home_rip_header">Rip</string>
-    <string name="home_rip_busy_footer">Er loopt een rip. Wacht tot die klaar is om een andere dvd te openen.</string>
+    <string name="home_rip_busy_footer">Er loopt een rip die zijn dvd nog leest. Wacht tot die klaar is om een andere te openen.</string>
+    <string name="source_rip_busy_footer">Er loopt nog een andere rip. Deze kan starten zodra die klaar is.</string>
     <string name="rip_status_starting">Starten…</string>
     <string name="rip_status_percent">%1$s klaar</string>
     <string name="rip_status_percent_left">%1$s · nog %2$s</string>
@@ -276,6 +279,10 @@
     <string name="source_problem_no_titles">Deze dvd heeft geen afspeelbare titels.</string>
     <string name="source_problem_busy">Er loopt nog een rip van een andere dvd.</string>
     <string name="source_problem_engine">De rip-engine kan niet draaien op dit toestel; DiscRip heeft een 64-bit ARM-telefoon of -tablet nodig.</string>
+    <string name="source_problem_disc_gone">De disc zit niet meer in het station, of het station werd losgekoppeld.</string>
+    <string name="source_problem_region">Het station weigert deze beveiligde dvd omdat zijn regio niet bij de disc past. Stel het station op een pc in op de regio van de disc (regio 2 voor Europese dvd\'s), in Windows bijvoorbeeld via Apparaatbeheer › dvd-station › Eigenschappen › Dvd-regio. Een station staat maar enkele wijzigingen toe.</string>
+    <string name="source_problem_css">Het station geeft deze beveiligde dvd niet vrij: de CSS-authenticatie mislukte. Koppel het station los, sluit het opnieuw aan en probeer het nog eens.</string>
+    <string name="source_title_drive">Disc in station</string>
     <string name="track_commentary">Commentaar</string>
     <string name="track_audio_description">Audiodescriptie</string>
     <string name="chapter_name">Hoofdstuk %1$d</string>
@@ -311,6 +318,15 @@
     <string name="rip_failure_write_failed">Schrijven naar de lokale map is mislukt.</string>
     <string name="rip_failure_output_unavailable">De app kan niet in de lokale map schrijven, bijvoorbeeld omdat de kaart verwijderd is. Kies de map opnieuw in Instellingen › Bewaren.</string>
     <string name="rip_failure_verify_failed">Het bestand is geschreven maar kon niet als Matroska worden nagelezen en is daarom verwijderd.</string>
+    <string name="rip_failure_drive_disconnected">Het station werd losgekoppeld of reageert niet meer. Het onvolledige bestand werd verwijderd.</string>
+    <string name="rip_failure_disc_changed">De disc werd uit het station gehaald of vervangen. Het onvolledige bestand werd verwijderd.</string>
+    <string name="rip_failure_region">Het station weigert de beveiligde sectoren van deze disc omdat zijn regio niet past. Stel het station op een pc in op de regio van de disc (regio 2 voor Europese dvd\'s).</string>
+    <string name="rip_failure_css_refused">Het station weigert de beveiligde sectoren, ook na CSS-authenticatie.</string>
+    <string name="rip_next_disc_header">Volgende disc</string>
+    <string name="rip_next_disc_insert">Steek de volgende disc in</string>
+    <string name="rip_next_disc_take_out">Haal de disc uit het station en steek de volgende in</string>
+    <string name="rip_next_disc_open">Volgende disc rippen</string>
+    <string name="rip_next_disc_footer">De disc is klaar en uit het station gekomen. De volgende mag erin, ook terwijl het bestand nog wordt geüpload.</string>
     <string name="rip_failure_failed">De rip is mislukt.</string>
     <string name="rip_failure_detail">Details: %1$s</string>
     <plurals name="source_chapters">

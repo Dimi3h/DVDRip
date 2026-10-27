@@ -36,9 +36,9 @@ data class RipRequest(
 )
 
 /**
- * A DVD open in the native engine: an ISO image or a VIDEO_TS folder. The engine allows one at a
- * time, so close a session before opening the next. Calls block; run them off the main thread.
- * [cancel] may be called from any thread while [rip] runs.
+ * A DVD open in the native engine: an ISO image, the disc in a USB drive or a VIDEO_TS folder. The
+ * engine allows one at a time, so close a session before opening the next. Calls block; run them
+ * off the main thread. [cancel] may be called from any thread while [rip] runs.
  */
 class DvdSession private constructor(private val handle: Long) : Closeable {
 
@@ -143,6 +143,25 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
             val handle = NativeRip.openImage(image.detachFd(), error)
             if (handle == 0L) throw DvdReadException(error[0]?.decodeToString() ?: "The image cannot be opened")
             return DvdSession(handle)
+        }
+
+        /**
+         * Opens the disc in a drive. Once the drive cannot go on ([DriveDisc.problem]), a running
+         * rip is stopped rather than left to skip every block that follows as unreadable.
+         */
+        fun openDrive(disc: DriveDisc): DvdSession {
+            var session: DvdSession? = null
+            val blocks = object : NativeBlocks {
+                override fun read(lba: Long, count: Int, buffer: ByteArray): Int {
+                    val got = disc.read(lba, count, buffer)
+                    if (got < 0 && disc.problem != null) session?.cancel()
+                    return got
+                }
+            }
+            val error = arrayOfNulls<ByteArray>(1)
+            val handle = NativeRip.openBlocks(blocks, error)
+            if (handle == 0L) throw DvdReadException(error[0]?.decodeToString() ?: "The disc cannot be opened")
+            return DvdSession(handle).also { session = it }
         }
 
         fun openFolder(tree: DvdTree): DvdSession {

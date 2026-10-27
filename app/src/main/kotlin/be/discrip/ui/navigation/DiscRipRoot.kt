@@ -91,6 +91,7 @@ fun DiscRipRoot(container: AppContainer) {
                         bottomPadding = bottomPadding,
                         onNewRip = { navController.navigate(MetadataRoute()) },
                         onOpenDiscMetadata = { label -> navController.navigate(MetadataRoute(volumeLabel = label)) },
+                        onOpenDrive = { insertion -> navController.navigate(DriveSourceRoute(insertion)) },
                         onOpenTmdbSettings = { navController.navigate(MetadataSettingsRoute) },
                         onOpenStorageSettings = { navController.navigate(StorageSettingsRoute) },
                         onOpenNasSettings = { navController.navigate(NasSettingsRoute) },
@@ -145,12 +146,27 @@ fun DiscRipRoot(container: AppContainer) {
                     onRipStarted = { navController.navigate(RipRoute) { popUpTo(HomeRoute) } },
                 )
             }
+            composable<DriveSourceRoute> { entry ->
+                val route = entry.toRoute<DriveSourceRoute>()
+                val source = remember(route) { DvdSource.Drive(route.insertion) }
+                SourceScreen(
+                    container = container,
+                    source = source,
+                    backLabel = stringResource(R.string.app_name),
+                    onBack = { navController.popIfResumed(entry) },
+                    onOpenMetadata = { label -> navController.navigate(MetadataRoute(volumeLabel = label)) },
+                    onOpenStorageSettings = { navController.navigate(StorageSettingsRoute) },
+                    onOpenNasSettings = { navController.navigate(NasSettingsRoute) },
+                    onRipStarted = { navController.navigate(RipRoute) { popUpTo(HomeRoute) } },
+                )
+            }
             composable<RipRoute> { entry ->
                 RipScreen(
                     container = container,
                     backLabel = stringResource(R.string.app_name),
                     onBack = { navController.popIfResumed(entry) },
                     onFinished = { navController.popBackStack(HomeRoute, inclusive = false) },
+                    onOpenDisc = { insertion -> navController.navigate(DriveSourceRoute(insertion)) { popUpTo(HomeRoute) } },
                 )
             }
             composable<QualitySettingsRoute> { entry ->

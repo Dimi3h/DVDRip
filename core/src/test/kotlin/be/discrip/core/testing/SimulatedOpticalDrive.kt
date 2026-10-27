@@ -151,6 +151,12 @@ class SimulatedOpticalDrive : BulkTransport {
         resetCss()
     }
 
+    /** A bus reset: the drive forgets the host's authentication and reports the reset once. */
+    fun busReset() {
+        unitAttention = Sense(0x06, 0x29, 0x00)
+        resetCss()
+    }
+
     private fun resetCss() {
         authenticationSucceeded = false
         cssSessions.fill(null)

@@ -18,6 +18,7 @@ import be.discrip.AppContainer
 import be.discrip.R
 import be.discrip.drive.DriveMessage
 import be.discrip.rip.RipState
+import be.discrip.rip.usesDisc
 import be.discrip.ui.components.AlertAction
 import be.discrip.ui.components.AlertActionStyle
 import be.discrip.ui.components.ButtonRow
@@ -39,6 +40,7 @@ fun HomeScreen(
     bottomPadding: Dp,
     onNewRip: () -> Unit,
     onOpenDiscMetadata: (volumeLabel: String?) -> Unit,
+    onOpenDrive: (insertion: Long) -> Unit,
     onOpenTmdbSettings: () -> Unit,
     onOpenStorageSettings: () -> Unit,
     onOpenNasSettings: () -> Unit,
@@ -59,13 +61,14 @@ fun HomeScreen(
     val colors = HigTheme.colors
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var driveMessage by remember { mutableStateOf<DriveMessage?>(null) }
-    val driveActions = remember(container, onOpenDiscMetadata) {
+    val driveActions = remember(container, onOpenDiscMetadata, onOpenDrive) {
         DriveActions(
             connect = container.drives::connect,
             eject = container.drives::eject,
             closeTray = container.drives::closeTray,
             retryDisc = container.drives::retryDisc,
             openMetadata = onOpenDiscMetadata,
+            openDisc = onOpenDrive,
         )
     }
 
@@ -123,7 +126,8 @@ fun HomeScreen(
             }
         }
 
-        val ripping = ripState is RipState.Running
+        // The next DVD can be opened while the last rip's file still travels to the NAS.
+        val ripping = ripState.usesDisc
         GroupedSection(
             header = stringResource(R.string.home_new_rip_header),
             footer = stringResource(if (ripping) R.string.home_rip_busy_footer else R.string.home_new_rip_footer),

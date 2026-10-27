@@ -9,8 +9,10 @@ import android.provider.OpenableColumns
 import android.system.ErrnoException
 import android.system.Os
 import androidx.core.net.toUri
+import be.discrip.core.css.CssAuthenticationException
 import be.discrip.core.disc.DiscProbe
 import be.discrip.core.disc.DiscProbeException
+import be.discrip.core.disc.DriveProblem
 import be.discrip.core.disc.FileBlockDevice
 import be.discrip.core.dvd.AudioTrackPlan
 import be.discrip.core.dvd.DvdReadException
@@ -64,12 +66,13 @@ import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** A DVD picked in the document UI: an ISO image or a VIDEO_TS folder. */
+/** A DVD to rip: an ISO image or a VIDEO_TS folder picked in the document UI, or the disc in the USB drive. */
 sealed interface DvdSource {
-    val uri: Uri
+    data class Image(val uri: Uri) : DvdSource
+    data class Folder(val uri: Uri) : DvdSource
 
-    data class Image(override val uri: Uri) : DvdSource
-    data class Folder(override val uri: Uri) : DvdSource
+    /** The disc in the USB drive, as it was when it went in ([be.discrip.core.disc.DiscState.Ready.insertion]). */
+    data class Drive(val insertion: Long) : DvdSource
 }
 
 enum class SourceProblem {
@@ -87,6 +90,15 @@ enum class SourceProblem {
 
     /** A rip from another DVD is running. */
     BUSY,
+
+    /** The disc is no longer in the drive, or the drive is gone. */
+    DISC_GONE,
+
+    /** The drive's region is not one the disc allows (or was never set), so it refuses the disc. */
+    REGION_MISMATCH,
+
+    /** The drive would not authenticate for the CSS-protected disc. */
+    CSS_FAILED,
 
     /** The native rip engine could not be loaded on this device. */
     ENGINE_UNAVAILABLE,
@@ -180,6 +192,8 @@ sealed interface RipState {
         val stage: RipStage = RipStage.RIPPING,
         val upload: TransferProgress? = null,
         val cancelling: Boolean = false,
+        /** The disc from the drive is done and came out; the next can go in while the file travels. */
+        val discEjected: Boolean = false,
     ) : RipState
 
     /** The disc was ripped; [nas] and [plex] tell whether the file also got where it was meant to. */
@@ -189,6 +203,8 @@ sealed interface RipState {
         val file: MkvSummary,
         /** The file in the local folder, when it stays there. */
         val localFile: String?,
+        /** A disc from the drive came out of it after the rip, ready for the next. */
+        val discEjected: Boolean = false,
         /** Null for a rip that stays local. */
         val nas: NasOutcome? = null,
         /** Null when Plex was not asked. */
@@ -208,6 +224,10 @@ sealed interface RipState {
         val nasProblem: NasProblem? = null,
     ) : RipState
 }
+
+/** The rip still reads its DVD: it is preparing or ripping, not yet uploading or waiting for Plex. */
+val RipState.usesDisc: Boolean
+    get() = this is RipState.Running && (stage == RipStage.PREPARING || stage == RipStage.RIPPING)
 
 /** An upload started again from the history. */
 data class Retry(val recordId: String, val stage: RipStage, val progress: TransferProgress?)
@@ -229,6 +249,10 @@ class RipManager(
     private val plex: PlexPublisher,
     private val outputs: RipOutputs = RipOutputs { _, target -> LocalOutput.create(resolver, target.treeUri.toUri(), target.path) },
     private val connectNas: (NasTarget) -> NasShare = { Nas.connect(it) },
+    /** Lends the disc in the USB drive ([be.discrip.drive.DriveManager.lease]). */
+    private val drives: (insertion: Long) -> DriveDisc? = { null },
+    /** A rip went well; called once it is in the history. */
+    private val onSucceeded: (RipJob) -> Unit = {},
 ) {
     private val engine = Dispatchers.IO.limitedParallelism(1)
 
@@ -244,6 +268,9 @@ class RipManager(
     /** Only touched on [engine]. */
     private var session: DvdSession? = null
 
+    /** The drive's disc [session] reads, when it does; only touched on [engine]. */
+    private var drive: DriveDisc? = null
+
     /** The session a rip is running on, for [cancel]. */
     @Volatile
     private var ripping: DvdSession? = null
@@ -256,11 +283,14 @@ class RipManager(
     @Volatile
     private var plexWait: Job? = null
 
-    /** Opens [dvd] and lists its titles, closing the DVD that was open; a no-op if it is open already. */
+    /**
+     * Opens [dvd] and lists its titles, closing the DVD that was open; a no-op if it is open
+     * already. The next disc can be opened while a rip's file still travels to the NAS.
+     */
     fun open(dvd: DvdSource) {
         val current = sourceState.value
         if (current.sourceOrNull == dvd && current !is SourceState.Failed) return
-        if (ripState.value is RipState.Running) {
+        if (ripState.value.usesDisc) {
             sourceState.value = SourceState.Failed(dvd, SourceProblem.BUSY, null)
             return
         }
@@ -272,6 +302,7 @@ class RipManager(
                 val (opened, name) = when (dvd) {
                     is DvdSource.Image -> openImage(dvd.uri)
                     is DvdSource.Folder -> openFolder(dvd.uri)
+                    is DvdSource.Drive -> openDrive(dvd)
                 }
                 val titles = try {
                     opened.titles()
@@ -288,10 +319,15 @@ class RipManager(
                 }
             } catch (e: NotDvdVideoException) {
                 SourceState.Failed(dvd, SourceProblem.NOT_DVD_VIDEO, null)
+            } catch (e: DiscGoneException) {
+                SourceState.Failed(dvd, SourceProblem.DISC_GONE, null)
+            } catch (e: CssAuthenticationException) {
+                val problem = if (e.regionMismatch) SourceProblem.REGION_MISMATCH else SourceProblem.CSS_FAILED
+                SourceState.Failed(dvd, driveSourceProblem() ?: problem, e.message)
             } catch (e: DvdReadException) {
-                SourceState.Failed(dvd, SourceProblem.UNREADABLE, e.message)
+                SourceState.Failed(dvd, driveSourceProblem() ?: SourceProblem.UNREADABLE, e.message)
             } catch (e: IOException) {
-                SourceState.Failed(dvd, SourceProblem.CANNOT_OPEN, e.message)
+                SourceState.Failed(dvd, driveSourceProblem() ?: SourceProblem.CANNOT_OPEN, e.message)
             } catch (e: SecurityException) {
                 SourceState.Failed(dvd, SourceProblem.CANNOT_OPEN, e.message)
             } catch (e: IllegalArgumentException) {
@@ -301,6 +337,8 @@ class RipManager(
                 // libdiscrip.so is arm64-v8a only.
                 SourceState.Failed(dvd, SourceProblem.ENGINE_UNAVAILABLE, e.message)
             }
+            // A drive whose disc did not open goes back to being polled.
+            if (session == null) releaseDrive()
         }
     }
 
@@ -309,7 +347,7 @@ class RipManager(
      * Returns the work that closes it, or null when there is nothing to close.
      */
     fun close(dvd: DvdSource): Job? {
-        if (sourceState.value.sourceOrNull != dvd || ripState.value is RipState.Running) return null
+        if (sourceState.value.sourceOrNull != dvd || ripState.value.usesDisc) return null
         sourceState.value = SourceState.None
         return scope.launch(engine) {
             if (sourceState.value == SourceState.None) closeSession()
@@ -327,6 +365,7 @@ class RipManager(
             val (state, pending) = runRip(job, cancelled)
             // In the history before anyone sees the rip end.
             record(job, state, pending)
+            if (state is RipState.Succeeded) onSucceeded(job)
             ripState.value = state
         }
         return true
@@ -424,56 +463,70 @@ class RipManager(
 
     /** The rip and, for the NAS, the upload and Plex; also what a failed upload needs to be tried again. */
     private suspend fun runRip(job: RipJob, cancelled: AtomicBoolean): Pair<RipState, PendingUpload?> {
-        val dvd = session ?: return RipState.Failed(job, RipFailure.FAILED, "No DVD is open") to null
-        val destination = job.destination
-        val needed = SizeEstimator.requiredFreeBytes(job.estimatedBytes)
-        val secrets = credentials()
-
-        // The NAS first: a rip should not start when its file cannot get there.
-        var direct: NasShare? = null
-        destination.nas?.let { nas ->
-            val share = try {
-                connectNas(nas.target(secrets.nasPassword))
-            } catch (e: NasException) {
-                return nasFailure(job, e) to null
-            }
-            val free = try {
-                share.checkWritable(nas.path.baseSegments)
-                share.freeBytes()
-            } catch (e: NasException) {
-                share.close()
-                return nasFailure(job, e) to null
-            }
-            if (free < needed) {
-                share.close()
-                return RipState.Failed(job, RipFailure.NO_SPACE, "", needed, free, NasProblem.FULL) to null
-            }
-            if (destination.writesDirectly) direct = share else share.close()
-            ripState.update { if (it is RipState.Running) it.copy(stage = RipStage.RIPPING) else it }
-        }
-
-        val staged = if (destination.local == null && !destination.writesDirectly) File(stagingDir, "${UUID.randomUUID()}.mkv") else null
+        val drive = job.source as? DvdSource.Drive
+        var discDone = false
         try {
-            val output = try {
-                when {
-                    destination.local != null -> outputs.create(job, destination.local)
-                    direct != null -> NasOutput(direct, destination.nas!!.path)
-                    else -> StagedOutput(staged!!.also { stagingDir.mkdirs() })
-                }
-            } catch (e: NasException) {
-                return nasFailure(job, e) to null
-            } catch (e: Exception) {
-                // SecurityException when access was withdrawn; IOException or IllegalStateException
-                // from the provider when the storage is gone.
-                return RipState.Failed(job, RipFailure.OUTPUT_UNAVAILABLE, e.message.orEmpty()) to null
-            }
-            val ripped = ripInto(job, dvd, output, needed, cancelled)
-            if (ripped !is RipState.Succeeded) return ripped to null
+            val dvd = session ?: return RipState.Failed(job, RipFailure.FAILED, "No DVD is open") to null
+            val destination = job.destination
+            val needed = SizeEstimator.requiredFreeBytes(job.estimatedBytes)
+            val secrets = credentials()
 
-            // From here on the disc is done; the engine thread is free while the file travels.
-            return withContext(Dispatchers.IO) { deliver(ripped, output, staged, secrets, cancelled) }
+            // The NAS first: a rip should not start when its file cannot get there.
+            var direct: NasShare? = null
+            destination.nas?.let { nas ->
+                val share = try {
+                    connectNas(nas.target(secrets.nasPassword))
+                } catch (e: NasException) {
+                    return nasFailure(job, e) to null
+                }
+                val free = try {
+                    share.checkWritable(nas.path.baseSegments)
+                    share.freeBytes()
+                } catch (e: NasException) {
+                    share.close()
+                    return nasFailure(job, e) to null
+                }
+                if (free < needed) {
+                    share.close()
+                    return RipState.Failed(job, RipFailure.NO_SPACE, "", needed, free, NasProblem.FULL) to null
+                }
+                if (destination.writesDirectly) direct = share else share.close()
+                ripState.update { if (it is RipState.Running) it.copy(stage = RipStage.RIPPING) else it }
+            }
+
+            val staged = if (destination.local == null && !destination.writesDirectly) File(stagingDir, "${UUID.randomUUID()}.mkv") else null
+            try {
+                val output = try {
+                    when {
+                        destination.local != null -> outputs.create(job, destination.local)
+                        direct != null -> NasOutput(direct, destination.nas!!.path)
+                        else -> StagedOutput(staged!!.also { stagingDir.mkdirs() })
+                    }
+                } catch (e: NasException) {
+                    return nasFailure(job, e) to null
+                } catch (e: Exception) {
+                    // SecurityException when access was withdrawn; IOException or IllegalStateException
+                    // from the provider when the storage is gone.
+                    return RipState.Failed(job, RipFailure.OUTPUT_UNAVAILABLE, e.message.orEmpty()) to null
+                }
+                var ripped = ripInto(job, dvd, output, needed, cancelled)
+                if (drive != null) {
+                    // Done with the disc; after a good rip it comes out, for the next one.
+                    discDone = true
+                    val ejected = finishDisc(drive, eject = ripped is RipState.Succeeded)
+                    if (ripped is RipState.Succeeded) ripped = ripped.copy(discEjected = ejected)
+                    ripState.update { if (it is RipState.Running) it.copy(discEjected = ejected) else it }
+                }
+                if (ripped !is RipState.Succeeded) return ripped to null
+
+                // From here on the disc is done; the engine thread is free while the file travels.
+                return withContext(Dispatchers.IO) { deliver(ripped, output, staged, secrets, cancelled) }
+            } finally {
+                direct?.close()
+            }
         } finally {
-            direct?.close()
+            // A rip from the drive that stopped before reading it gives the drive back all the same.
+            if (drive != null && !discDone) finishDisc(drive, eject = false)
         }
     }
 
@@ -488,6 +541,8 @@ class RipManager(
                     if (free != null && free < needed) return@use null to null
                 }
                 ripping = dvd
+                // A locked tray keeps the disc in while it is read.
+                drive?.preventRemoval(true)
                 val outcome = try {
                     dvd.rip(request(job), file, cancelled::get) { done, total, bytes, position ->
                         val progress = tracker.update(done, total, bytes, position)
@@ -495,6 +550,7 @@ class RipManager(
                     }
                 } finally {
                     ripping = null
+                    drive?.preventRemoval(false)
                 }
                 outcome to if (outcome is RipOutcome.Success) DvdSession.probe(file) else null
             }
@@ -515,6 +571,8 @@ class RipManager(
         }
         if (outcome is RipOutcome.Failure) {
             output.discard()
+            // The drive stopped the rip: say why, rather than "cancelled".
+            driveFailure()?.let { return RipState.Failed(job, it, outcome.message) }
             // On the NAS the engine only sees an errno; the NAS client knows what went wrong.
             (output as? NasOutput)?.error?.let { if (outcome.reason != RipFailure.CANCELLED) return nasFailure(job, it) }
             return RipState.Failed(job, outcome.reason, outcome.message)
@@ -710,9 +768,62 @@ class RipManager(
     private fun closeSession() {
         session?.close()
         session = null
+        releaseDrive()
+    }
+
+    /** Gives the drive back, to be polled again. */
+    private fun releaseDrive() {
+        drive?.close()
+        drive = null
+    }
+
+    /**
+     * The disc in the drive, authenticated when it is (or may be) CSS protected, so a region the
+     * drive refuses shows before the rip; named by its volume label.
+     */
+    private fun openDrive(source: DvdSource.Drive): Pair<DvdSession, String?> {
+        val disc = drives(source.insertion) ?: throw DiscGoneException()
+        drive = disc
+        if (!disc.info.isDvdVideo) throw NotDvdVideoException()
+        if (disc.info.cssProtected != false) {
+            try {
+                disc.unlock()
+            } catch (e: CssAuthenticationException) {
+                // A disc that did not say whether it is protected may not be; its reads will tell.
+                if (e.regionMismatch || disc.info.cssProtected == true) throw e
+            }
+        }
+        return DvdSession.openDrive(disc) to disc.info.label
+    }
+
+    /** Closes the drive's disc after a rip, ejecting it first when asked; true when it came out. */
+    private fun finishDisc(source: DvdSource.Drive, eject: Boolean): Boolean {
+        session?.close()
+        session = null
+        val ejected = eject && drive?.eject() == true
+        releaseDrive()
+        sourceState.update { if (it.sourceOrNull == source) SourceState.None else it }
+        return ejected
+    }
+
+    private fun driveSourceProblem(): SourceProblem? = when (drive?.problem) {
+        null -> null
+        DriveProblem.DISCONNECTED, DriveProblem.DISC_CHANGED -> SourceProblem.DISC_GONE
+        DriveProblem.REGION_MISMATCH -> SourceProblem.REGION_MISMATCH
+        DriveProblem.CSS_FAILED -> SourceProblem.CSS_FAILED
+    }
+
+    private fun driveFailure(): RipFailure? = when (drive?.problem) {
+        null -> null
+        DriveProblem.DISCONNECTED -> RipFailure.DRIVE_DISCONNECTED
+        DriveProblem.DISC_CHANGED -> RipFailure.DISC_CHANGED
+        DriveProblem.REGION_MISMATCH -> RipFailure.REGION_MISMATCH
+        DriveProblem.CSS_FAILED -> RipFailure.CSS_REFUSED
     }
 
     private class NotDvdVideoException : Exception()
+
+    private class DiscGoneException : Exception()
 
     /** The image's volume label names it; its file name when the label is missing. */
     private fun openImage(uri: Uri): Pair<DvdSession, String?> {

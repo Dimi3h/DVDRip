@@ -80,7 +80,8 @@ sealed interface DriveStatus {
 
     data class Failed(val device: UsbCandidate, val reason: DriveFailure, val detail: String?) : DriveStatus
 
-    data class Connected(val drive: DriveInfo, val disc: DiscState) : DriveStatus
+    /** [inUse]: the disc is lent to the rip engine; the drive is not polled meanwhile. */
+    data class Connected(val drive: DriveInfo, val disc: DiscState, val inUse: Boolean = false) : DriveStatus
 }
 
 /** One-off outcomes of user actions, shown as alerts. */

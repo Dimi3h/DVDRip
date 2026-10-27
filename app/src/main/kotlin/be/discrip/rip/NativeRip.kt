@@ -17,6 +17,9 @@ internal object NativeRip {
     /** Opens the image on [fd], which native code owns from here on; 0 with [error] set on failure. */
     @JvmStatic external fun openImage(fd: Int, error: Array<ByteArray?>): Long
 
+    /** Opens the disc [blocks] reads (a USB drive); 0 with [error] set on failure. */
+    @JvmStatic external fun openBlocks(blocks: NativeBlocks, error: Array<ByteArray?>): Long
+
     @JvmStatic external fun openFolder(folder: NativeFolder, error: Array<ByteArray?>): Long
 
     /** `{"titles":[…]}` or `{"error":"…"}`. */

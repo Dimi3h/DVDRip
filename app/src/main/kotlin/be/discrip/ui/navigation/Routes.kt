@@ -19,6 +19,10 @@ data class MetadataRoute(val volumeLabel: String? = null)
 @Serializable
 data class SourceRoute(val folder: Boolean, val uri: String)
 
+/** The disc in the USB drive; [insertion] is [be.discrip.core.disc.DiscState.Ready.insertion]. */
+@Serializable
+data class DriveSourceRoute(val insertion: Long)
+
 /** The running or last rip. */
 @Serializable
 data object RipRoute

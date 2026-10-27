@@ -111,16 +111,17 @@ class OpticalDrive(private val bot: BulkOnlyTransport) : AutoCloseable {
 
     /**
      * Reads [blocks] 2048-byte blocks starting at [lba], [MAX_BLOCKS_PER_READ] per command. Each
-     * command is retried [MAX_READ_RETRIES] times on transient errors; conditions that cannot
-     * improve (region mismatch, no medium, out of range) fail at once.
+     * command is retried [retries] times on transient errors; conditions that cannot improve
+     * (region mismatch, no medium, out of range) fail at once.
      */
-    fun read(lba: Long, blocks: Int, buffer: ByteArray, offset: Int = 0) {
+    fun read(lba: Long, blocks: Int, buffer: ByteArray, offset: Int = 0, retries: Int = MAX_READ_RETRIES) {
         require(blocks >= 0) { "Negative block count" }
+        require(retries >= 0) { "Negative retry count" }
         require(offset >= 0 && offset.toLong() + blocks.toLong() * BLOCK_SIZE <= buffer.size) { "Buffer too small" }
         var done = 0
         while (done < blocks) {
             val count = minOf(MAX_BLOCKS_PER_READ, blocks - done)
-            readChunk(lba + done, count, buffer, offset + done * BLOCK_SIZE)
+            readChunk(lba + done, count, buffer, offset + done * BLOCK_SIZE, retries)
             done += count
         }
     }
@@ -204,7 +205,7 @@ class OpticalDrive(private val bot: BulkOnlyTransport) : AutoCloseable {
 
     override fun close() = bot.close()
 
-    private fun readChunk(lba: Long, count: Int, buffer: ByteArray, offset: Int) {
+    private fun readChunk(lba: Long, count: Int, buffer: ByteArray, offset: Int, maxRetries: Int) {
         val bytes = count * BLOCK_SIZE
         var retries = 0
         while (true) {
@@ -221,7 +222,7 @@ class OpticalDrive(private val bot: BulkOnlyTransport) : AutoCloseable {
             } catch (e: BotProtocolException) {
                 e
             }
-            if (++retries > MAX_READ_RETRIES) throw ReadFailedException(lba, count, failure)
+            if (++retries > maxRetries) throw ReadFailedException(lba, count, failure)
         }
     }
 

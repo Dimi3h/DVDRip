@@ -41,6 +41,8 @@ class DriveActions(
     val closeTray: () -> Unit,
     val retryDisc: () -> Unit,
     val openMetadata: (volumeLabel: String?) -> Unit,
+    /** Opens the disc's titles to rip it; [insertion] is [DiscState.Ready.insertion]. */
+    val openDisc: (insertion: Long) -> Unit,
 )
 
 /** The "Station" section of Home: the USB drive and the disc in it. */
@@ -94,12 +96,12 @@ fun DriveSection(status: DriveStatus, actions: DriveActions) {
             row { ButtonRow(stringResource(R.string.drive_reconnect), onClick = { actions.connect(status.device.deviceName) }) }
         }
 
-        is DriveStatus.Connected -> ConnectedDrive(header, status.drive, status.disc, actions)
+        is DriveStatus.Connected -> ConnectedDrive(header, status.drive, status.disc, status.inUse, actions)
     }
 }
 
 @Composable
-private fun ConnectedDrive(header: String, drive: DriveInfo, disc: DiscState, actions: DriveActions) {
+private fun ConnectedDrive(header: String, drive: DriveInfo, disc: DiscState, inUse: Boolean, actions: DriveActions) {
     val transport = drive.libusbVersion?.let { stringResource(R.string.drive_transport_libusb, it) }
         ?: stringResource(R.string.drive_transport_android)
     val footer = when (disc) {
@@ -118,13 +120,14 @@ private fun ConnectedDrive(header: String, drive: DriveInfo, disc: DiscState, ac
                 row { TwoLineRow(stringResource(R.string.disc_none), stringResource(R.string.disc_none_subtitle)) }
                 row { ButtonRow(stringResource(R.string.disc_open_tray), onClick = actions.eject) }
             }
-            is DiscState.Ready -> readyDisc(disc.disc, actions)
+            is DiscState.Ready -> readyDisc(disc, inUse, actions)
             is DiscState.Unusable -> unusableDisc(disc.problem, actions)
         }
     }
 }
 
-private fun SectionScope.readyDisc(disc: DiscInfo, actions: DriveActions) {
+private fun SectionScope.readyDisc(ready: DiscState.Ready, inUse: Boolean, actions: DriveActions) {
+    val disc = ready.disc
     row {
         val kind = if (disc.isDvdVideo) R.string.disc_dvd_video else R.string.disc_not_dvd_video
         TwoLineRow(
@@ -150,7 +153,13 @@ private fun SectionScope.readyDisc(disc: DiscInfo, actions: DriveActions) {
             )
         }
     }
+    if (inUse) {
+        // The rip engine has the disc; the tray stays as it is meanwhile.
+        row { BusyRow(stringResource(R.string.disc_in_use)) }
+        return
+    }
     if (disc.isDvdVideo) {
+        row { NavigationRow(stringResource(R.string.disc_rip), onClick = { actions.openDisc(ready.insertion) }) }
         row { NavigationRow(stringResource(R.string.disc_metadata), onClick = { actions.openMetadata(disc.label) }) }
     }
     row { ButtonRow(stringResource(R.string.disc_eject), onClick = actions.eject) }

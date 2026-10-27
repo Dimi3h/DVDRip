@@ -11,6 +11,7 @@ import be.discrip.core.usb.BotProtocolException
 import be.discrip.core.usb.TransferFailure
 import be.discrip.core.usb.UsbTransferException
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicLong
 
 sealed interface DiscState {
     /** Not polled yet. */
@@ -22,7 +23,11 @@ sealed interface DiscState {
     /** A disc is spinning up or being read for the first time. */
     data object Loading : DiscState
 
-    data class Ready(val disc: DiscInfo) : DiscState
+    /**
+     * [insertion] tells this disc from one put in later, even a copy of the same disc: every
+     * probe gives a new number, unique in the process.
+     */
+    data class Ready(val disc: DiscInfo, val insertion: Long) : DiscState
 
     data class Unusable(val problem: DiscProblem) : DiscState
 }
@@ -124,7 +129,7 @@ class DriveMonitor(
 
     private fun runProbe(): DiscState {
         val result = try {
-            DiscState.Ready(probe(drive))
+            DiscState.Ready(probe(drive), insertions.incrementAndGet())
         } catch (e: DiscProbeException) {
             DiscState.Unusable(e.problem)
         } catch (e: ScsiCommandException) {
@@ -161,6 +166,8 @@ class DriveMonitor(
         private const val MAX_UNIT_ATTENTIONS = 4
 
         private val ATTENTION = setOf(SenseCategory.MEDIUM_CHANGED, SenseCategory.RESET)
+
+        private val insertions = AtomicLong()
         private val CHANGE_EVENTS = setOf(MediaEvent.NEW_MEDIA, MediaEvent.MEDIA_REMOVAL, MediaEvent.MEDIA_CHANGED)
     }
 }

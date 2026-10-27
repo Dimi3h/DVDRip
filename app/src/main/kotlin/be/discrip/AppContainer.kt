@@ -67,6 +67,9 @@ class AppContainer(context: Context) {
             settings = settingsRepository::current,
             history = history,
             plex = PlexPublisher(plex),
+            drives = drives::lease,
+            // The film's metadata went into its file; the next disc is another film.
+            onSucceeded = { job -> if (ripDraft.metadata.value == job.metadata) ripDraft.setMetadata(null) },
         )
     }
 

@@ -30,6 +30,9 @@ import be.discrip.core.dvd.Iso639
 import be.discrip.core.format.Formats
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.plex.PlexPublication
+import be.discrip.core.disc.DiscState
+import be.discrip.drive.DriveStatus
+import be.discrip.rip.DvdSource
 import be.discrip.rip.NasOutcome
 import be.discrip.rip.PlexOutcome
 import be.discrip.rip.RipJob
@@ -52,8 +55,15 @@ import be.discrip.ui.theme.HigTheme
 
 /** The running rip with its progress, then its result. */
 @Composable
-fun RipScreen(container: AppContainer, backLabel: String, onBack: () -> Unit, onFinished: () -> Unit) {
+fun RipScreen(
+    container: AppContainer,
+    backLabel: String,
+    onBack: () -> Unit,
+    onFinished: () -> Unit,
+    onOpenDisc: (insertion: Long) -> Unit,
+) {
     val state by container.rips.rip.collectAsStateWithLifecycle()
+    val driveStatus by container.drives.status.collectAsStateWithLifecycle()
     var confirmCancel by rememberSaveable { mutableStateOf(false) }
 
     // Nothing to show, for example when the app was restarted: back to where the user came from.
@@ -85,6 +95,10 @@ fun RipScreen(container: AppContainer, backLabel: String, onBack: () -> Unit, on
                         row { BusyRow(stringResource(R.string.rip_stage_plex)) }
                     }
                 }
+                val source = rip.job.source
+                if (source is DvdSource.Drive && (rip.stage == RipStage.UPLOADING || rip.stage == RipStage.PLEX)) {
+                    NextDisc(driveStatus, source, rip.discEjected, onOpenDisc)
+                }
                 GroupedSection(footer = stringResource(R.string.rip_keep_open_footer)) {
                     row {
                         if (rip.stage == RipStage.PLEX) {
@@ -112,6 +126,13 @@ fun RipScreen(container: AppContainer, backLabel: String, onBack: () -> Unit, on
                 JobHeader(rip.job)
                 SucceededContent(rip)
                 DeliveryContent(rip)
+                val source = rip.job.source
+                if (source is DvdSource.Drive) {
+                    NextDisc(driveStatus, source, rip.discEjected) { insertion ->
+                        container.rips.dismiss()
+                        onOpenDisc(insertion)
+                    }
+                }
                 DoneButton(container, onFinished)
             }
             is RipState.Failed -> {
@@ -337,6 +358,30 @@ private fun SucceededContent(rip: RipState.Succeeded) {
                 row { TextRow(pluralStringResource(R.plurals.rip_bad_sectors, badSectors.toInt(), badSectors.toInt())) }
             }
             for (warning in result.warnings) row { TextRow(warning) }
+        }
+    }
+}
+
+/**
+ * After a rip from the drive, so a stack of discs goes quickly: put the next one in, then rip it
+ * from here once the drive has read it.
+ */
+@Composable
+private fun NextDisc(status: DriveStatus, ripped: DvdSource.Drive, ejected: Boolean, onOpenDisc: (insertion: Long) -> Unit) {
+    val disc = (status as? DriveStatus.Connected)?.takeIf { !it.inUse }?.disc
+    GroupedSection(
+        header = stringResource(R.string.rip_next_disc_header),
+        footer = if (ejected) stringResource(R.string.rip_next_disc_footer) else null,
+    ) {
+        when {
+            disc is DiscState.Ready && disc.insertion != ripped.insertion && disc.disc.isDvdVideo -> {
+                row { TextRow(disc.disc.label ?: stringResource(R.string.disc_untitled)) }
+                row { ButtonRow(stringResource(R.string.rip_next_disc_open), onClick = { onOpenDisc(disc.insertion) }) }
+            }
+            disc == DiscState.Loading -> row { BusyRow(stringResource(R.string.disc_reading)) }
+            else -> row {
+                TextRow(stringResource(if (ejected || disc is DiscState.NoDisc) R.string.rip_next_disc_insert else R.string.rip_next_disc_take_out))
+            }
         }
     }
 }

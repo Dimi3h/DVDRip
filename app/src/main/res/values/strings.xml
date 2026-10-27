@@ -217,6 +217,8 @@
     <string name="disc_region_mismatch_footer">The drive is set to region %1$s and this disc is for region %2$s. Set the drive to region %3$s on a PC, in Windows for example under Device Manager › DVD drive › Properties › DVD Region. A drive allows only a few changes.</string>
     <string name="disc_region_not_set_footer">The drive has no region yet and therefore refuses protected DVDs. Set it to region %1$s on a PC, in Windows for example under Device Manager › DVD drive › Properties › DVD Region.</string>
     <string name="disc_metadata">Metadata for this disc</string>
+    <string name="disc_rip">Rip</string>
+    <string name="disc_in_use">In use for ripping</string>
     <string name="disc_eject">Eject</string>
     <string name="disc_not_dvd_video_footer">This disc has no VIDEO_TS folder, so it is not a video DVD.</string>
     <string name="disc_wrong_medium_title">Not a DVD</string>
@@ -240,7 +242,8 @@
     <string name="home_open_iso">ISO file</string>
     <string name="home_open_folder">VIDEO_TS folder</string>
     <string name="home_rip_header">Rip</string>
-    <string name="home_rip_busy_footer">A rip is running. Wait until it is done before opening another DVD.</string>
+    <string name="home_rip_busy_footer">A rip is still reading its DVD. Wait until it is done before opening another.</string>
+    <string name="source_rip_busy_footer">Another rip is still running. This one can start once it is done.</string>
     <string name="rip_status_starting">Starting…</string>
     <string name="rip_status_percent">%1$s done</string>
     <string name="rip_status_percent_left">%1$s · %2$s left</string>
@@ -278,6 +281,10 @@
     <string name="source_problem_no_titles">This DVD has no playable titles.</string>
     <string name="source_problem_busy">A rip from another DVD is still running.</string>
     <string name="source_problem_engine">The rip engine cannot run on this device; DiscRip needs a 64-bit ARM phone or tablet.</string>
+    <string name="source_problem_disc_gone">The disc is no longer in the drive, or the drive was disconnected.</string>
+    <string name="source_problem_region">The drive refuses this protected DVD because its region does not match the disc. Set the drive on a PC to the disc\'s region (region 2 for European DVDs), in Windows for example under Device Manager › DVD drive › Properties › DVD Region. A drive allows only a few changes.</string>
+    <string name="source_problem_css">The drive will not hand out this protected DVD: CSS authentication failed. Disconnect the drive, connect it again and try once more.</string>
+    <string name="source_title_drive">Disc in drive</string>
     <string name="track_commentary">Commentary</string>
     <string name="track_audio_description">Audio description</string>
     <string name="chapter_name">Chapter %1$d</string>
@@ -313,6 +320,15 @@
     <string name="rip_failure_write_failed">Writing to the local folder failed.</string>
     <string name="rip_failure_output_unavailable">The app cannot write to the local folder, for example because the card was removed. Choose the folder again in Settings › Storage.</string>
     <string name="rip_failure_verify_failed">The file was written but could not be read back as Matroska, so it has been deleted.</string>
+    <string name="rip_failure_drive_disconnected">The drive was disconnected or stopped responding. The unfinished file has been deleted.</string>
+    <string name="rip_failure_disc_changed">The disc was taken out of the drive or replaced. The unfinished file has been deleted.</string>
+    <string name="rip_failure_region">The drive refuses the protected sectors of this disc because its region does not match. Set the drive on a PC to the disc\'s region (region 2 for European DVDs).</string>
+    <string name="rip_failure_css_refused">The drive refuses the protected sectors, also after CSS authentication.</string>
+    <string name="rip_next_disc_header">Next disc</string>
+    <string name="rip_next_disc_insert">Insert the next disc</string>
+    <string name="rip_next_disc_take_out">Take the disc out of the drive and insert the next one</string>
+    <string name="rip_next_disc_open">Rip the next disc</string>
+    <string name="rip_next_disc_footer">The disc is done and came out of the drive. The next one can go in, also while the file is still being uploaded.</string>
     <string name="rip_failure_failed">The rip failed.</string>
     <string name="rip_failure_detail">Details: %1$s</string>
     <plurals name="source_chapters">

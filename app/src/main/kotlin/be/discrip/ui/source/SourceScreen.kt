@@ -104,7 +104,13 @@ fun SourceScreen(
     }
 
     HigScaffold(
-        title = ready?.name ?: stringResource(if (source is DvdSource.Folder) R.string.home_open_folder else R.string.home_open_iso),
+        title = ready?.name ?: stringResource(
+            when (source) {
+                is DvdSource.Folder -> R.string.home_open_folder
+                is DvdSource.Image -> R.string.home_open_iso
+                is DvdSource.Drive -> R.string.source_title_drive
+            },
+        ),
         largeTitle = false,
         backLabel = backLabel,
         onBack = onBack,
@@ -115,7 +121,8 @@ fun SourceScreen(
             }
             is SourceState.Failed -> GroupedSection(footer = dvd.detail) {
                 row { TextRow(stringResource(problemText(dvd.problem))) }
-                if (dvd.problem != SourceProblem.NOT_DVD_VIDEO && dvd.problem != SourceProblem.ENGINE_UNAVAILABLE) {
+                // Another try cannot change these; a disc gone from the drive is opened anew from Home.
+                if (dvd.problem !in FINAL_PROBLEMS) {
                     row { ButtonRow(stringResource(R.string.action_retry), onClick = viewModel::retry) }
                 }
             }
@@ -234,7 +241,7 @@ private fun ReadyContent(
     )
     if (state.ripRunning) {
         Text(
-            text = stringResource(R.string.home_rip_busy_footer),
+            text = stringResource(R.string.source_rip_busy_footer),
             style = HigTheme.typography.footnote,
             color = colors.secondaryLabel,
             modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 8.dp),
@@ -458,6 +465,9 @@ private fun problemText(problem: SourceProblem): Int = when (problem) {
     SourceProblem.NO_TITLES -> R.string.source_problem_no_titles
     SourceProblem.BUSY -> R.string.source_problem_busy
     SourceProblem.ENGINE_UNAVAILABLE -> R.string.source_problem_engine
+    SourceProblem.DISC_GONE -> R.string.source_problem_disc_gone
+    SourceProblem.REGION_MISMATCH -> R.string.source_problem_region
+    SourceProblem.CSS_FAILED -> R.string.source_problem_css
 }
 
 @Composable
@@ -474,3 +484,10 @@ private fun TextRow(text: String) {
         Text(text, style = HigTheme.typography.body, color = HigTheme.colors.label, modifier = Modifier.weight(1f).padding(vertical = 11.dp))
     }
 }
+
+private val FINAL_PROBLEMS = setOf(
+    SourceProblem.NOT_DVD_VIDEO,
+    SourceProblem.ENGINE_UNAVAILABLE,
+    SourceProblem.DISC_GONE,
+    SourceProblem.REGION_MISMATCH,
+)

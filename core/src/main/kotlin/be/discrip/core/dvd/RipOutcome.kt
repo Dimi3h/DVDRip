@@ -19,6 +19,18 @@ enum class RipFailure {
     OUTPUT_UNAVAILABLE,
     /** The file was written but could not be read back as Matroska. */
     VERIFY_FAILED,
+
+    /** The USB drive was unplugged, or stopped answering. */
+    DRIVE_DISCONNECTED,
+
+    /** The disc was taken out of the drive, or another one put in. */
+    DISC_CHANGED,
+
+    /** The drive's region is not one the disc allows, so it refuses the scrambled sectors. */
+    REGION_MISMATCH,
+
+    /** The drive keeps refusing the scrambled sectors, also after CSS authentication. */
+    CSS_REFUSED,
     FAILED,
 }
 

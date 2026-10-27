@@ -113,6 +113,10 @@ fun failureText(reason: RipFailure): String = stringResource(
         RipFailure.WRITE_FAILED -> R.string.rip_failure_write_failed
         RipFailure.OUTPUT_UNAVAILABLE -> R.string.rip_failure_output_unavailable
         RipFailure.VERIFY_FAILED -> R.string.rip_failure_verify_failed
+        RipFailure.DRIVE_DISCONNECTED -> R.string.rip_failure_drive_disconnected
+        RipFailure.DISC_CHANGED -> R.string.rip_failure_disc_changed
+        RipFailure.REGION_MISMATCH -> R.string.rip_failure_region
+        RipFailure.CSS_REFUSED -> R.string.rip_failure_css_refused
         RipFailure.FAILED -> R.string.rip_failure_failed
     },
 )
