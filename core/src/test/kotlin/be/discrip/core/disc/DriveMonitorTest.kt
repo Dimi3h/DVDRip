@@ -76,6 +76,19 @@ class DriveMonitorTest {
     }
 
     @Test
+    fun `every disc that goes in is a new insertion, even the same one`() {
+        simulator.insert(movie)
+        val first = assertIs<DiscState.Ready>(pollUntilSettled()).insertion
+        assertEquals(first, assertIs<DiscState.Ready>(monitor.poll()).insertion)
+
+        simulator.removeDisc()
+        monitor.poll()
+        simulator.insert(movie)
+
+        assertTrue(assertIs<DiscState.Ready>(pollUntilSettled()).insertion > first)
+    }
+
+    @Test
     fun `a disc changed between two polls is probed again`() {
         simulator.insert(movie)
         assertEquals("Movie", label(pollUntilSettled()))

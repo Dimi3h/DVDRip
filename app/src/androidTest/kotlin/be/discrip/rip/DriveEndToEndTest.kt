@@ -64,14 +64,18 @@ class DriveEndToEndTest {
         assertTrue("the drive should be given back", disc.closed)
         assertEquals(SourceState.None, rig.manager.source.value)
 
-        // Decrypted right, the two files differ only in the year, the muxing date, the random
-        // segment id and the checksums over them; with a wrong key every packet would differ.
+        // Decrypted right, the two files differ only in their headers: the year, the muxing date,
+        // the random segment and track ids, and the checksums over them (as two rips of the clear
+        // image do). The packets, in the clusters after them, are the same; with a wrong key they
+        // would all differ.
         val files = rig.filesIn(rig.out).associateBy { it.name }
         val fromImage = files.getValue("Testfilm (2023).mkv").readBytes()
         val fromDrive = files.getValue("Testfilm (2024).mkv").readBytes()
         assertEquals(fromImage.size, fromDrive.size)
-        val differing = fromImage.indices.count { fromImage[it] != fromDrive[it] }
-        assertTrue("$differing bytes differ", differing < 64)
+        val firstCluster = fromImage.indexOf(MATROSKA_CLUSTER)
+        assertTrue("no cluster in the file", firstCluster > 0)
+        val lastDiffering = fromImage.indices.lastOrNull { fromImage[it] != fromDrive[it] } ?: -1
+        assertTrue("byte $lastDiffering differs, after the first cluster at $firstCluster", lastDiffering < firstCluster)
         assertEquals(RipResult.SUCCEEDED, rig.history.load().first().result)
     }
 
@@ -197,7 +201,13 @@ class DriveEndToEndTest {
         }
     }
 
+    private fun ByteArray.indexOf(pattern: ByteArray): Int =
+        (0..size - pattern.size).firstOrNull { start -> pattern.indices.all { this[start + it] == pattern[it] } } ?: -1
+
     private companion object {
         const val INSERTION = 1L
+
+        /** The EBML id of a Matroska cluster. */
+        val MATROSKA_CLUSTER = byteArrayOf(0x1F, 0x43, 0xB6.toByte(), 0x75)
     }
 }

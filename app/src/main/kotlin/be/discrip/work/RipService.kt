@@ -15,7 +15,6 @@ import be.discrip.DiscRipApplication
 import be.discrip.rip.DvdSource
 import be.discrip.rip.Retry
 import be.discrip.rip.RipState
-import be.discrip.rip.usesDisc
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,9 +28,10 @@ import kotlinx.coroutines.launch
  * Wi-Fi lock while files go to the NAS. The work itself runs in [be.discrip.rip.RipManager]; the
  * service follows it and stops once nothing runs.
  *
- * While the drive is read the service is of type connectedDevice (the USB permission DiscRip
- * holds is its prerequisite, and it has no time limit); otherwise dataSync, which Android 15
- * limits to 6 hours a day in the background.
+ * A rip from the drive makes it a connectedDevice service (the USB permission DiscRip holds is
+ * the prerequisite) and dataSync for the upload after it, both from the start, while the app is in
+ * the foreground: a type changed later, from the background, might not be allowed. Other work is
+ * dataSync only, which Android 15 limits to 6 hours a day in the background.
  */
 class RipService : Service() {
 
@@ -41,6 +41,9 @@ class RipService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var foregroundType = 0
+
+    /** Android refused connectedDevice (no USB permission after all); dataSync it is. */
+    private var driveTypeRefused = false
     private var following = false
 
     /** The rip seen running, to tell how it ended. */
@@ -57,9 +60,9 @@ class RipService : Service() {
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DiscRip:rip")
             .apply { setReferenceCounted(false) }
-        @Suppress("DEPRECATION")
         // Replaced by a low-latency lock on Android 14 and later, which only helps while the screen
         // is on; on older versions it keeps Wi-Fi out of power save for the transfer.
+        @Suppress("DEPRECATION")
         wifiLock = applicationContext.getSystemService(WifiManager::class.java)
             ?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "DiscRip:nas")
             ?.apply { setReferenceCounted(false) }
@@ -107,12 +110,13 @@ class RipService : Service() {
 
     /** Puts the service in the foreground with the right type, updates the notification and the locks. */
     private fun show(running: RipState.Running?, retry: Retry?, force: Boolean) {
-        val readsDrive = running != null && running.job.source is DvdSource.Drive && running.usesDisc
-        val type = if (readsDrive) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        val drive = running?.job?.source is DvdSource.Drive && !driveTypeRefused
+        val type = if (drive) DRIVE_TYPES else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         val text = notifications.progressText(running, retry)
         val stage = running?.stage ?: retry?.stage
         val now = SystemClock.elapsedRealtime()
-        val typeChanged = type != foregroundType
+        // A rip from the drive keeps its types to the end; only the next job may change them.
+        val typeChanged = type != foregroundType && !(running == null && foregroundType == DRIVE_TYPES)
         // Progress at most once a second (Android drops faster updates anyway); a new stage at once.
         val due = text != lastText && (stage != lastStage || now - lastUpdate >= MIN_UPDATE_MILLIS)
         if (!force && !typeChanged && !due) return
@@ -127,6 +131,7 @@ class RipService : Service() {
                     type
                 } catch (e: SecurityException) {
                     // The USB permission went away: carry on as data transfer.
+                    driveTypeRefused = true
                     ServiceCompat.startForeground(this, RipNotifications.PROGRESS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 }
@@ -156,6 +161,8 @@ class RipService : Service() {
     companion object {
         private const val TAG = "DiscRip"
         const val ACTION_STOP = "be.discrip.action.STOP_RIP"
+
+        private const val DRIVE_TYPES = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 
         /** Notification updates at most this often, unless the stage changes. */
         private const val MIN_UPDATE_MILLIS = 1_000L

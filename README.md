@@ -435,10 +435,12 @@ These were made without asking because they do not change the architecture; each
     code. FFmpeg (LGPL-2.1-or-later) and libusb (LGPL-2.1-or-later) stay separate shared libraries.
 21. **A foreground service follows the work.** The rip and the upload run in `RipManager`; the
     service (`work/RipService`) starts when either starts, holds a partial wake lock, shows and
-    updates the notification and stops when nothing runs. Its type is `connectedDevice` while the
-    USB drive is read (the USB permission DiscRip holds is its prerequisite, and it has no time
-    limit) and `dataSync` otherwise, which Android 15 limits to six hours a day in the background;
-    should that run out, the work goes on without the service. A Wi-Fi lock is held while files go
+    updates the notification and stops when nothing runs. A rip from the drive makes it a
+    `connectedDevice` service (the USB permission DiscRip holds is the prerequisite) and `dataSync`
+    for the upload that follows, both from the start, while the app is in the foreground, because
+    a type changed later, from the background, may be refused. Other work is `dataSync`, which
+    Android 15 limits to six hours a day in the background; should that run out, the work goes on
+    without the service. A Wi-Fi lock is held while files go
     to the NAS or Plex is asked; on Android 14 and later Android turns it into a low-latency lock
     that only works with the screen on, so with the screen off Wi-Fi may save power and transfer
     more slowly, but stays connected. The rip screen no longer keeps the display on.
