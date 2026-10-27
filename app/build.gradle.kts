@@ -22,6 +22,8 @@ android {
     // Current AndroidX, Compose and OkHttp releases require compiling against API 37. The app
     // still targets API 35 as specified; compileSdk only decides which APIs are visible.
     compileSdk = 37
+    // NDK r30. With r28 and later, native libraries are 16 KB page aligned by default.
+    ndkVersion = "30.0.16248370"
 
     defaultConfig {
         applicationId = "be.discrip"
@@ -30,6 +32,22 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=none"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "4.1.2"
+        }
     }
 
     signingConfigs {
@@ -75,8 +93,8 @@ android {
         abortOnError = true
         warningsAsErrors = false
         checkDependencies = false
-        // targetSdk 35 is a project requirement, not an oversight.
-        disable += "OldTargetApi"
+        // targetSdk 35 and arm64-v8a only are project requirements, not oversights.
+        disable += setOf("OldTargetApi", "ChromeOsAbiSupport")
     }
 }
 
@@ -84,6 +102,19 @@ kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
     }
+}
+
+// The native build compiles third-party sources that are not in git. The script fetches them,
+// pinned by version and SHA-256, and returns at once when they are already in place.
+val fetchNativeSources by tasks.registering(Exec::class) {
+    description = "Downloads the pinned third-party sources of the native build."
+    val script = rootProject.file("native/scripts/fetch-sources.sh")
+    inputs.file(script)
+    commandLine("bash", script.absolutePath)
+}
+
+tasks.named("preBuild") {
+    dependsOn(fetchNativeSources)
 }
 
 dependencies {

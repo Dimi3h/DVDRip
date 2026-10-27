@@ -1,8 +1,10 @@
 package be.discrip.ui.home
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
@@ -12,6 +14,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import be.discrip.AppContainer
 import be.discrip.R
+import be.discrip.drive.DriveMessage
 import be.discrip.ui.components.AlertAction
 import be.discrip.ui.components.AlertActionStyle
 import be.discrip.ui.components.ButtonRow
@@ -31,6 +34,7 @@ fun HomeScreen(
     container: AppContainer,
     bottomPadding: Dp,
     onNewRip: () -> Unit,
+    onOpenDiscMetadata: (volumeLabel: String?) -> Unit,
     onOpenTmdbSettings: () -> Unit,
     onOpenStorageSettings: () -> Unit,
     onOpenNasSettings: () -> Unit,
@@ -38,8 +42,23 @@ fun HomeScreen(
 ) {
     val viewModel = viewModel { HomeViewModel(container) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val driveStatus by container.drives.status.collectAsStateWithLifecycle()
     val colors = HigTheme.colors
     var confirmClear by rememberSaveable { mutableStateOf(false) }
+    var driveMessage by remember { mutableStateOf<DriveMessage?>(null) }
+    val driveActions = remember(container, onOpenDiscMetadata) {
+        DriveActions(
+            connect = container.drives::connect,
+            eject = container.drives::eject,
+            closeTray = container.drives::closeTray,
+            retryDisc = container.drives::retryDisc,
+            openMetadata = onOpenDiscMetadata,
+        )
+    }
+
+    LaunchedEffect(container) {
+        container.drives.messages.collect { driveMessage = it }
+    }
 
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
@@ -47,6 +66,8 @@ fun HomeScreen(
     }
 
     HigScaffold(title = stringResource(R.string.app_name), bottomPadding = bottomPadding) {
+        DriveSection(driveStatus, driveActions)
+
         val home = state ?: return@HigScaffold
 
         val draft = home.draft
@@ -130,6 +151,20 @@ fun HomeScreen(
                 )
             }
         }
+    }
+
+    driveMessage?.let { message ->
+        HigAlert(
+            title = stringResource(
+                when (message) {
+                    DriveMessage.EJECT_FAILED -> R.string.drive_message_eject_failed
+                    DriveMessage.CLOSE_TRAY_FAILED -> R.string.drive_message_close_tray_failed
+                },
+            ),
+            message = null,
+            actions = listOf(AlertAction(stringResource(R.string.action_ok), AlertActionStyle.CANCEL) { driveMessage = null }),
+            onDismissRequest = { driveMessage = null },
+        )
     }
 
     if (confirmClear) {

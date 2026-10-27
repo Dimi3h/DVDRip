@@ -84,6 +84,7 @@ fun DiscRipRoot(container: AppContainer) {
                         container = container,
                         bottomPadding = bottomPadding,
                         onNewRip = { navController.navigate(MetadataRoute()) },
+                        onOpenDiscMetadata = { label -> navController.navigate(MetadataRoute(volumeLabel = label)) },
                         onOpenTmdbSettings = { navController.navigate(MetadataSettingsRoute) },
                         onOpenStorageSettings = { navController.navigate(StorageSettingsRoute) },
                         onOpenNasSettings = { navController.navigate(NasSettingsRoute) },

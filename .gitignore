@@ -3,6 +3,9 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
+# Third-party sources fetched by native/scripts/fetch-sources.sh
+native/third_party/
+
 # Android
 local.properties
 *.apk
