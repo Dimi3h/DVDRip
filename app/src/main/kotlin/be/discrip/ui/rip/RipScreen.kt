@@ -3,6 +3,7 @@ package be.discrip.ui.rip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -12,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -22,8 +24,14 @@ import be.discrip.AppContainer
 import be.discrip.R
 import be.discrip.core.dvd.Iso639
 import be.discrip.core.format.Formats
+import be.discrip.core.dvd.RipFailure
+import be.discrip.core.plex.PlexPublication
+import be.discrip.rip.NasOutcome
+import be.discrip.rip.PlexOutcome
 import be.discrip.rip.RipJob
+import be.discrip.rip.RipStage
 import be.discrip.rip.RipState
+import be.discrip.ui.components.ActivityIndicator
 import be.discrip.ui.components.AlertAction
 import be.discrip.ui.components.AlertActionStyle
 import be.discrip.ui.components.ButtonRow
@@ -35,6 +43,7 @@ import be.discrip.ui.components.ProgressBar
 import be.discrip.ui.components.RowFrame
 import be.discrip.ui.components.ValueRow
 import be.discrip.ui.settings.currentLocale
+import be.discrip.ui.settings.nasProblemText
 import be.discrip.ui.theme.HigTheme
 
 /** The running rip with its progress, then its result. */
@@ -61,22 +70,43 @@ fun RipScreen(container: AppContainer, backLabel: String, onBack: () -> Unit, on
             RipState.Idle -> Unit
             is RipState.Running -> {
                 JobHeader(rip.job)
-                RunningContent(rip)
+                when (rip.stage) {
+                    RipStage.PREPARING -> GroupedSection(header = stringResource(R.string.rip_progress_header)) {
+                        row { BusyRow(stringResource(R.string.rip_stage_preparing)) }
+                    }
+                    RipStage.RIPPING -> RunningContent(rip)
+                    RipStage.UPLOADING -> UploadContent(rip)
+                    RipStage.PLEX -> GroupedSection(header = stringResource(R.string.rip_stage_plex_header)) {
+                        row { BusyRow(stringResource(R.string.rip_stage_plex)) }
+                    }
+                }
                 GroupedSection(footer = stringResource(R.string.rip_keep_open_footer)) {
                     row {
-                        ButtonRow(
-                            text = stringResource(if (rip.cancelling) R.string.rip_cancelling else R.string.rip_cancel),
-                            onClick = { confirmCancel = true },
-                            color = HigTheme.colors.red,
-                            enabled = !rip.cancelling,
-                            loading = rip.cancelling,
-                        )
+                        if (rip.stage == RipStage.PLEX) {
+                            // Plex scans either way; this only stops waiting for it.
+                            ButtonRow(text = stringResource(R.string.rip_plex_skip), onClick = { container.rips.cancel() })
+                        } else {
+                            ButtonRow(
+                                text = stringResource(
+                                    when {
+                                        rip.cancelling -> R.string.rip_cancelling
+                                        rip.stage == RipStage.UPLOADING -> R.string.rip_cancel_upload
+                                        else -> R.string.rip_cancel
+                                    },
+                                ),
+                                onClick = { confirmCancel = true },
+                                color = HigTheme.colors.red,
+                                enabled = !rip.cancelling,
+                                loading = rip.cancelling,
+                            )
+                        }
                     }
                 }
             }
             is RipState.Succeeded -> {
                 JobHeader(rip.job)
                 SucceededContent(rip)
+                DeliveryContent(rip)
                 DoneButton(container, onFinished)
             }
             is RipState.Failed -> {
@@ -84,26 +114,41 @@ fun RipScreen(container: AppContainer, backLabel: String, onBack: () -> Unit, on
                 val locale = currentLocale()
                 val needed = rip.neededBytes
                 val free = rip.freeBytes
+                val local = rip.job.destination.local != null
                 GroupedSection(
                     header = stringResource(R.string.rip_failed_header),
                     footer = when {
-                        needed != null && free != null ->
-                            stringResource(R.string.rip_failure_no_space_numbers, Formats.bytes(needed, locale), Formats.bytes(free, locale))
+                        needed != null && free != null -> stringResource(
+                            when {
+                                rip.nasProblem != null -> R.string.rip_failure_no_space_numbers_nas
+                                local -> R.string.rip_failure_no_space_numbers
+                                else -> R.string.rip_failure_no_space_numbers_app
+                            },
+                            Formats.bytes(needed, locale),
+                            Formats.bytes(free, locale),
+                        )
                         rip.message.isNotBlank() -> stringResource(R.string.rip_failure_detail, rip.message)
                         else -> null
                     },
                 ) {
-                    row { TextRow(failureText(rip.reason)) }
+                    row { TextRow(failureText(rip)) }
                 }
                 DoneButton(container, onFinished)
             }
         }
     }
 
+    val uploading = (state as? RipState.Running)?.takeIf { it.stage == RipStage.UPLOADING }
     if (confirmCancel && running) {
         HigAlert(
-            title = stringResource(R.string.rip_cancel_title),
-            message = stringResource(R.string.rip_cancel_message),
+            title = stringResource(if (uploading != null) R.string.rip_cancel_upload_title else R.string.rip_cancel_title),
+            message = stringResource(
+                when {
+                    uploading == null -> R.string.rip_cancel_message
+                    uploading.job.destination.local != null -> R.string.rip_cancel_upload_message_both
+                    else -> R.string.rip_cancel_upload_message_nas
+                },
+            ),
             actions = listOf(
                 AlertAction(stringResource(R.string.rip_keep_going), AlertActionStyle.CANCEL) { confirmCancel = false },
                 AlertAction(stringResource(R.string.rip_cancel), AlertActionStyle.DESTRUCTIVE) {
@@ -163,15 +208,68 @@ private fun RunningContent(rip: RipState.Running) {
 }
 
 @Composable
+private fun UploadContent(rip: RipState.Running) {
+    val locale = currentLocale()
+    val upload = rip.upload
+    val measuring = stringResource(R.string.rip_measuring)
+    GroupedSection(header = stringResource(R.string.rip_upload_header)) {
+        row {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+                Text(
+                    text = if (upload == null) stringResource(R.string.rip_status_starting) else percent(upload.fraction, locale),
+                    style = HigTheme.typography.title1.copy(fontWeight = FontWeight.SemiBold),
+                    color = HigTheme.colors.label,
+                )
+                ProgressBar(upload?.fraction ?: 0f, Modifier.padding(top = 10.dp))
+            }
+        }
+        row { ValueRow(stringResource(R.string.rip_speed), upload?.bytesPerSecond?.let { Formats.speed(it, locale) } ?: measuring) }
+        row { ValueRow(stringResource(R.string.rip_remaining), upload?.remainingMs?.let { Formats.duration(it / 1000) } ?: measuring) }
+        if (upload != null) {
+            row {
+                ValueRow(
+                    stringResource(R.string.rip_uploaded),
+                    Formats.bytes(upload.bytesDone, locale) + " / " + Formats.bytes(upload.bytesTotal, locale),
+                )
+            }
+        }
+    }
+}
+
+/** Where the file ended up: the local folder, the NAS, and what Plex made of it. */
+@Composable
+private fun DeliveryContent(rip: RipState.Succeeded) {
+    val colors = HigTheme.colors
+    GroupedSection(header = stringResource(R.string.rip_saved_header)) {
+        rip.localFile?.let { row { DetailRow(stringResource(R.string.rip_saved_local), it) } }
+        when (val nas = rip.nas) {
+            is NasOutcome.Stored -> row { DetailRow(stringResource(R.string.rip_saved_nas), nas.location) }
+            is NasOutcome.Failed -> row {
+                val text = stringResource(nasProblemText(nas.problem))
+                val again = when {
+                    !nas.pending -> null
+                    rip.localFile != null -> stringResource(R.string.rip_upload_pending_local)
+                    else -> stringResource(R.string.rip_upload_pending)
+                }
+                DetailRow(stringResource(R.string.rip_saved_nas), listOfNotNull(text, again).joinToString(" "), colors.orange)
+            }
+            NasOutcome.Cancelled -> row { DetailRow(stringResource(R.string.rip_saved_nas), stringResource(R.string.rip_upload_cancelled)) }
+            null -> Unit
+        }
+        rip.plex?.let { plex ->
+            val problem = plex !is PlexOutcome.Published || plex.publication !is PlexPublication.Added
+            row { DetailRow(stringResource(R.string.rip_saved_plex), plexText(plex), if (problem) colors.orange else null) }
+        }
+    }
+}
+
+@Composable
 private fun SucceededContent(rip: RipState.Succeeded) {
     val locale = currentLocale()
     val result = rip.result
     val file = rip.file
     val badSectors = result.badSectorCount
-    GroupedSection(
-        header = stringResource(R.string.rip_done_header),
-        footer = stringResource(R.string.rip_result_footer, rip.job.path.relativeFile),
-    ) {
+    GroupedSection(header = stringResource(R.string.rip_done_header), footer = stringResource(R.string.rip_result_footer)) {
         row { ValueRow(stringResource(R.string.rip_result_size), Formats.bytes(result.outputBytes, locale)) }
         row { ValueRow(stringResource(R.string.rip_result_duration), Formats.duration(file.durationMs / 1000)) }
         row { ValueRow(stringResource(R.string.rip_result_chapters), file.chapterStartsMs.size.toString()) }
@@ -224,5 +322,48 @@ private fun DoneButton(container: AppContainer, onFinished: () -> Unit) {
 private fun TextRow(text: String) {
     RowFrame {
         Text(text, style = HigTheme.typography.body, color = HigTheme.colors.label, modifier = Modifier.weight(1f).padding(vertical = 11.dp))
+    }
+}
+
+@Composable
+private fun BusyRow(text: String) {
+    RowFrame {
+        Text(text, style = HigTheme.typography.body, color = HigTheme.colors.secondaryLabel, modifier = Modifier.weight(1f).padding(vertical = 11.dp))
+        ActivityIndicator(Modifier.size(20.dp))
+    }
+}
+
+/** A label with a longer text under it, such as a path. */
+@Composable
+private fun DetailRow(title: String, detail: String, detailColor: Color? = null) {
+    RowFrame {
+        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+            Text(title, style = HigTheme.typography.body, color = HigTheme.colors.label)
+            Text(detail, style = HigTheme.typography.subheadline, color = detailColor ?: HigTheme.colors.secondaryLabel)
+        }
+    }
+}
+
+@Composable
+private fun plexText(plex: PlexOutcome): String = when (plex) {
+    is PlexOutcome.Published -> when (val publication = plex.publication) {
+        is PlexPublication.Added -> stringResource(R.string.rip_plex_added, publication.title)
+        is PlexPublication.NotSeen -> stringResource(R.string.rip_plex_not_seen)
+        PlexPublication.SectionMissing -> stringResource(R.string.rip_plex_section_missing)
+    }
+    PlexOutcome.NotAwaited -> stringResource(R.string.rip_plex_not_awaited)
+    is PlexOutcome.Failed -> stringResource(plexResultText(plex.result))
+}
+
+/** The failure in words that fit where the file was going: the local folder, the app's storage or the NAS. */
+@Composable
+private fun failureText(failed: RipState.Failed): String {
+    val problem = failed.nasProblem
+    val local = failed.job.destination.local != null
+    return when {
+        problem != null -> stringResource(nasProblemText(problem))
+        !local && failed.reason == RipFailure.NO_SPACE -> stringResource(R.string.rip_failure_no_app_space)
+        !local && failed.reason == RipFailure.WRITE_FAILED -> stringResource(R.string.rip_failure_app_write_failed)
+        else -> failureText(failed.reason)
     }
 }

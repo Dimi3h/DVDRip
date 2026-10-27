@@ -1,5 +1,6 @@
 package be.discrip.ui.settings
 
+import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.stringResource
@@ -7,16 +8,23 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import be.discrip.AppContainer
 import be.discrip.R
+import be.discrip.core.format.Formats
+import be.discrip.core.nas.NasProblem
 import be.discrip.core.settings.normalizeFolderSetting
+import be.discrip.ui.components.ButtonRow
 import be.discrip.ui.components.GroupedSection
 import be.discrip.ui.components.HigScaffold
 import be.discrip.ui.components.ToggleRow
+import be.discrip.ui.theme.HigTheme
 
 @Composable
 fun NasSettingsScreen(container: AppContainer, onBack: () -> Unit) {
     val viewModel = rememberSettingsViewModel(container)
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
+    val check by viewModel.nasCheck.collectAsStateWithLifecycle()
+    val colors = HigTheme.colors
+    val locale = currentLocale()
 
     HigScaffold(
         title = stringResource(R.string.nas_title),
@@ -75,6 +83,22 @@ fun NasSettingsScreen(container: AppContainer, onBack: () -> Unit) {
             }
         }
 
+        val (checkText, checkColor) = when (val result = check) {
+            is NasCheck.Connected -> stringResource(R.string.nas_test_ok, Formats.bytes(result.freeBytes, locale)) to colors.green
+            is NasCheck.Failed -> stringResource(nasProblemText(result.problem)) to colors.red
+            else -> stringResource(R.string.nas_test_footer) to null
+        }
+        GroupedSection(footer = checkText, footerColor = checkColor) {
+            row {
+                ButtonRow(
+                    text = stringResource(R.string.nas_test),
+                    onClick = viewModel::testNas,
+                    enabled = current.nas.isConfigured,
+                    loading = check == NasCheck.Running,
+                )
+            }
+        }
+
         GroupedSection(
             header = stringResource(R.string.nas_folders_header),
             footer = stringResource(R.string.nas_folders_footer),
@@ -107,4 +131,15 @@ fun NasSettingsScreen(container: AppContainer, onBack: () -> Unit) {
             }
         }
     }
+}
+
+/** What the user reads when the NAS cannot be used. */
+@StringRes
+fun nasProblemText(problem: NasProblem): Int = when (problem) {
+    NasProblem.UNREACHABLE -> R.string.nas_problem_unreachable
+    NasProblem.LOGIN_REFUSED -> R.string.nas_problem_login
+    NasProblem.SHARE_NOT_FOUND -> R.string.nas_problem_share
+    NasProblem.ACCESS_DENIED -> R.string.nas_problem_denied
+    NasProblem.FULL -> R.string.nas_problem_full
+    NasProblem.FAILED -> R.string.nas_problem_failed
 }

@@ -58,6 +58,7 @@ class SourceScreenTest {
                     onBack = {},
                     onOpenMetadata = {},
                     onOpenStorageSettings = {},
+                    onOpenNasSettings = {},
                     onRipStarted = {},
                 )
             }

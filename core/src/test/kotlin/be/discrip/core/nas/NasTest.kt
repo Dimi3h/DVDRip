@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.io.File
+import java.io.IOException
 import kotlin.random.Random
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -95,6 +96,32 @@ class NasTest {
     }
 
     @Test
+    fun `renames a finished file over an earlier one`() {
+        share.upload("film.mkv", 1, { buffer, position -> copy(byteArrayOf(1), buffer, position) })
+        share.create("film.mkv.part").use { it.write(byteArrayOf(4, 5), 0, 2, 0) }
+
+        share.rename("film.mkv.part", "film.mkv")
+
+        assertContentEquals(byteArrayOf(4, 5), File(root, "film.mkv").readBytes())
+        assertFalse(File(root, "film.mkv.part").exists())
+    }
+
+    @Test
+    fun `a cancelled upload leaves nothing behind`() {
+        var chunks = 0
+        val done = share.upload("big.mkv", 64L * 1024 * 1024, { buffer, _ -> buffer.size }, isCancelled = { chunks++ >= 2 })
+
+        assertFalse(done)
+        assertEquals(emptyList(), root.list()!!.toList())
+    }
+
+    @Test
+    fun `a source that ends early fails the upload and leaves nothing behind`() {
+        assertThrows<IOException> { share.upload("short.mkv", 100, { _, position -> if (position == 0L) 10 else 0 }) }
+        assertEquals(emptyList(), root.list()!!.toList())
+    }
+
+    @Test
     fun `deletes and tells missing files apart`() {
         share.upload("gone.mkv", 1, { buffer, position -> copy(byteArrayOf(1), buffer, position) })
         share.delete("gone.mkv")
@@ -120,9 +147,18 @@ class NasTest {
     }
 
     @Test
+    fun `the write check leaves only the folders behind`() {
+        share.checkWritable(listOf("Films", "Sci-fi"))
+
+        assertTrue(File(root, "Films/Sci-fi").isDirectory)
+        assertEquals(emptyList(), File(root, "Films/Sci-fi").list()!!.toList())
+    }
+
+    @Test
     fun `a share the user may only read refuses folders and files`() {
         Nas.connect(target.copy(share = env("DISCRIP_SMB_READONLY_SHARE"))).use { readOnly ->
             assertTrue(readOnly.freeBytes() > 0)
+            assertThrows<NasException.AccessDenied> { readOnly.checkWritable(emptyList()) }
             assertThrows<NasException.AccessDenied> { readOnly.ensureFolders(listOf("Films")) }
             assertThrows<NasException.AccessDenied> {
                 readOnly.upload("film.mkv", 1, { buffer, position -> copy(byteArrayOf(1), buffer, position) })

@@ -120,11 +120,14 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       # man-db rebuilds its index after every install, which takes many minutes on the runners.
-      - name: Install the tools for the test DVD
+      - name: Install the tools for the test DVD and Samba
         run: |
           sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg dvdauthor genisoimage
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg dvdauthor genisoimage samba
+      # The NAS tests on the emulator reach this machine's Samba server as 10.0.2.2.
+      - name: Start a Samba server for the NAS tests
+        run: scripts/samba-test-server.sh start /tmp/discrip-samba >> "$GITHUB_ENV"
       - name: Cache third-party sources and the Android FFmpeg build
         uses: actions/cache@v6
         with:
@@ -139,9 +142,9 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Build the app and its instrumented tests
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
-      # The emulator wants 1.2 times its data partition free: 7.4 GB for the default 6 GB, about
-      # what the runner has left after the native build. -partition-size makes it 2 GB (the
-      # action's disk-size input did not take effect), and toolchains this job never uses go.
+      # The emulator wants 1.2 times its 6 GB data partition free (7.4 GB), about what the runner
+      # has left after the native build; smaller partitions (the action's disk-size input, the
+      # emulator's -partition-size) did not take effect. Toolchains this job never uses free 14 GB.
       - name: Free disk space for the emulator
         run: |
           df -h /
@@ -154,14 +157,19 @@ jobs:
           api-level: 30
           target: google_apis
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -partition-size 2048
           disable-animations: true
-          script: |
-            adb shell df -h /data
+          script: >-
             ./gradlew :app:connectedDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.smbHost=10.0.2.2
+            -Pandroid.testInstrumentationRunnerArguments.smbPort=$DISCRIP_SMB_PORT
+            -Pandroid.testInstrumentationRunnerArguments.smbShare=$DISCRIP_SMB_SHARE
+            -Pandroid.testInstrumentationRunnerArguments.smbReadOnlyShare=$DISCRIP_SMB_READONLY_SHARE
+            -Pandroid.testInstrumentationRunnerArguments.smbUser=$DISCRIP_SMB_USER
+            -Pandroid.testInstrumentationRunnerArguments.smbPassword=$DISCRIP_SMB_PASSWORD
+      # Skipped tests fail the job: here every test, the NAS ones included, must run.
       - name: Instrumented test results
         if: always()
-        run: python3 scripts/test_summary.py app/build/outputs/androidTest-results/connected
+        run: python3 scripts/test_summary.py --no-skipped app/build/outputs/androidTest-results/connected
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v7

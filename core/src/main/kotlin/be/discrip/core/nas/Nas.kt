@@ -33,17 +33,42 @@ data class NasTarget(
 ) {
     companion object {
         const val DEFAULT_PORT = 445
+
+        /**
+         * The target for a host as typed in the settings: `nas.local`, `192.168.1.10`, or with a
+         * port, `nas.local:1445` or `[fd00::2]:1445`.
+         */
+        fun of(host: String, share: String, username: String, password: String, domain: String = ""): NasTarget {
+            val text = host.trim()
+            val bracketed = Regex("""^\[([^\]]+)](?::(\d{1,5}))?$""").matchEntire(text)
+            val (name, port) = when {
+                bracketed != null -> bracketed.groupValues[1] to bracketed.groupValues[2].toIntOrNull()
+                text.count { it == ':' } == 1 -> text.substringBefore(':') to text.substringAfter(':').toIntOrNull()
+                else -> text to null
+            }
+            return NasTarget(name, share.trim().trim('/', '\\'), username.trim(), password, domain.trim(), port ?: DEFAULT_PORT)
+        }
     }
 }
 
+/** Why the NAS could not be used, as the app tells the user. */
+enum class NasProblem {
+    UNREACHABLE,
+    LOGIN_REFUSED,
+    SHARE_NOT_FOUND,
+    ACCESS_DENIED,
+    FULL,
+    FAILED,
+}
+
 /** Why the NAS could not be used. */
-sealed class NasException(message: String, cause: Throwable? = null) : IOException(message, cause) {
-    class Unreachable(cause: Throwable) : NasException("The NAS cannot be reached: ${cause.message}", cause)
-    class LoginRefused(cause: Throwable) : NasException("The NAS refused the user name or password", cause)
-    class ShareNotFound(share: String, cause: Throwable) : NasException("The NAS has no share called $share", cause)
-    class AccessDenied(path: String, cause: Throwable) : NasException("No permission for '$path' on the NAS", cause)
-    class Full(cause: Throwable) : NasException("The share on the NAS is full", cause)
-    class Failed(cause: Throwable) : NasException("The NAS reported an error: ${cause.message}", cause)
+sealed class NasException(val problem: NasProblem, message: String, cause: Throwable? = null) : IOException(message, cause) {
+    class Unreachable(cause: Throwable) : NasException(NasProblem.UNREACHABLE, "The NAS cannot be reached: ${cause.message}", cause)
+    class LoginRefused(cause: Throwable) : NasException(NasProblem.LOGIN_REFUSED, "The NAS refused the user name or password", cause)
+    class ShareNotFound(share: String, cause: Throwable) : NasException(NasProblem.SHARE_NOT_FOUND, "The NAS has no share called $share", cause)
+    class AccessDenied(path: String, cause: Throwable) : NasException(NasProblem.ACCESS_DENIED, "No permission for '$path' on the NAS", cause)
+    class Full(cause: Throwable) : NasException(NasProblem.FULL, "The share on the NAS is full", cause)
+    class Failed(cause: Throwable) : NasException(NasProblem.FAILED, "The NAS reported an error: ${cause.message}", cause)
 }
 
 /** Connects to SMB 2 and 3 servers such as a Synology NAS, through smbj. */
@@ -169,6 +194,31 @@ class NasShare internal constructor(
         nas(path) { if (share.fileExists(smb(path))) share.rm(smb(path)) }
     }
 
+    /**
+     * Proves the user may write in [folders] below the share's root, creating them where missing:
+     * a small file is written there and removed again. Throws [NasException.AccessDenied] when not.
+     */
+    fun checkWritable(folders: List<String>) {
+        ensureFolders(folders)
+        val probe = (folders + WRITE_TEST_NAME).joinToString("/")
+        create(probe).use { it.write(byteArrayOf(0), 0, 1, 0) }
+        delete(probe)
+    }
+
+    /** Renames the file at [from] to [to] within the share, replacing a file at [to]. */
+    fun rename(from: String, to: String) {
+        nas(from) {
+            share.openFile(
+                smb(from),
+                EnumSet.of(AccessMask.DELETE, AccessMask.FILE_READ_ATTRIBUTES),
+                EnumSet.of(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+                EnumSet.of(SMB2ShareAccess.FILE_SHARE_READ, SMB2ShareAccess.FILE_SHARE_DELETE),
+                SMB2CreateDisposition.FILE_OPEN,
+                EnumSet.noneOf(SMB2CreateOptions::class.java),
+            ).use { it.rename(smb(to), true) }
+        }
+    }
+
     /** Creates the file at [path] (emptying an existing one), for writing anywhere and reading back. */
     fun create(path: String): NasFile = nas(path) {
         NasFile(
@@ -201,25 +251,42 @@ class NasShare internal constructor(
     /**
      * Copies [size] bytes from [read] (which fills a buffer from a position, returning the bytes
      * read) to [path]: written as `<path>.part`, its size checked, then renamed over any file of
-     * that name. [onProgress] gets the bytes written so far.
+     * that name. [onProgress] gets the bytes written so far. Returns false, leaving nothing behind,
+     * when [isCancelled] turns true; on a failure the `.part` file is removed too.
      */
-    fun upload(path: String, size: Long, read: (ByteArray, Long) -> Int, onProgress: (Long) -> Unit = {}) {
+    fun upload(
+        path: String,
+        size: Long,
+        read: (ByteArray, Long) -> Int,
+        onProgress: (Long) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
+    ): Boolean {
         val partPath = "$path$PART_SUFFIX"
         val buffer = ByteArray(UPLOAD_CHUNK)
-        create(partPath).use { file ->
-            var position = 0L
-            while (position < size) {
-                val got = read(buffer, position)
-                if (got <= 0) throw IOException("The source ended at $position of $size bytes")
-                file.write(buffer, 0, got, position)
-                position += got
-                onProgress(position)
+        try {
+            create(partPath).use { file ->
+                var position = 0L
+                while (position < size) {
+                    if (isCancelled()) break
+                    val got = read(buffer, position)
+                    if (got <= 0) throw IOException("The source ended at $position of $size bytes")
+                    file.write(buffer, 0, got, position)
+                    position += got
+                    onProgress(position)
+                }
+                if (position < size) return@use
+                file.flush()
+                val written = file.length
+                if (written != size) throw NasException.Failed(IOException("$written of $size bytes arrived on the NAS"))
+                file.rename(path)
+                return true
             }
-            file.flush()
-            val written = file.length
-            if (written != size) throw NasException.Failed(IOException("$written of $size bytes arrived on the NAS"))
-            file.rename(path)
+        } catch (e: IOException) {
+            quietly { delete(partPath) }
+            throw e
         }
+        quietly { delete(partPath) }
+        return false
     }
 
     override fun close() {
@@ -232,6 +299,7 @@ class NasShare internal constructor(
     companion object {
         const val PART_SUFFIX = ".part"
         private const val UPLOAD_CHUNK = 4 * 1024 * 1024
+        private const val WRITE_TEST_NAME = ".discrip-write-test"
     }
 }
 

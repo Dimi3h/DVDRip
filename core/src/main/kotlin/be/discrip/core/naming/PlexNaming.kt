@@ -17,6 +17,15 @@ data class RipPath(
     val relativeFolder: String get() = folderSegments.joinToString("/")
 
     val relativeFile: String get() = (folderSegments + fileName).joinToString("/")
+
+    companion object {
+        /** The path of [relativeFile] ("Films/Title (Year)/Title (Year).mkv"), as [relativeFile] writes it. */
+        fun of(relativeFile: String): RipPath {
+            val segments = relativeFile.split('/').filter { it.isNotEmpty() }
+            require(segments.size >= 2) { "'$relativeFile' has no film folder" }
+            return RipPath(segments.dropLast(2), segments[segments.size - 2], segments.last())
+        }
+    }
 }
 
 /**

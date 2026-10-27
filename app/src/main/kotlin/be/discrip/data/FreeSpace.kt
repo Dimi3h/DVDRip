@@ -33,4 +33,7 @@ object FreeSpace {
         } ?: return null
         return runCatching { StatFs(directory.path).availableBytes }.getOrNull()
     }
+
+    /** Free space in the app's own storage, where NAS rips wait for their upload. */
+    fun ofAppStorage(context: Context): Long? = runCatching { StatFs(context.filesDir.path).availableBytes }.getOrNull()
 }

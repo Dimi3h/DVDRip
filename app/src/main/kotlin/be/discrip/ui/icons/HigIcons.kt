@@ -145,6 +145,23 @@ object HigIcons {
         }
     }
 
+    /** clock.fill: a face with the hands cut out, at a quarter past twelve. */
+    val Clock: ImageVector by lazy {
+        icon("Clock") {
+            fill(evenOdd = true) {
+                circle(12f, 12f, 10f)
+                moveTo(11.1f, 6.7f)
+                arcTo(0.9f, 0.9f, 0f, false, true, 12.9f, 6.7f)
+                lineTo(12.9f, 11.1f)
+                lineTo(15.6f, 11.1f)
+                arcTo(0.9f, 0.9f, 0f, false, true, 15.6f, 12.9f)
+                lineTo(12f, 12.9f)
+                arcTo(0.9f, 0.9f, 0f, false, true, 11.1f, 12f)
+                close()
+            }
+        }
+    }
+
     val Folder: ImageVector by lazy {
         icon("Folder") {
             fill {

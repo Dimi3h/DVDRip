@@ -56,8 +56,9 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
     }
 
     /**
-     * Rips to [output], which must be open for reading and writing; it stays the caller's.
-     * [onProgress] gets sectors done, sectors in total, bytes written and the position in the title.
+     * Rips to [output], a descriptor open for reading and writing or a [NativeFile]; it stays the
+     * caller's. [onProgress] gets sectors done, sectors in total, bytes written and the position
+     * in the title.
      *
      * [isCancelled] is the caller's own flag for this rip. [cancel] stops the engine at once, but a
      * cancel that comes just before the engine starts would be lost, so the flag is checked here
@@ -65,7 +66,7 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
      */
     fun rip(
         request: RipRequest,
-        output: ParcelFileDescriptor,
+        output: EngineFile,
         isCancelled: () -> Boolean,
         onProgress: (Long, Long, Long, Long) -> Unit,
     ): RipOutcome =
@@ -94,8 +95,8 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
                 tagKeys = request.tags.keys.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 tagValues = request.tags.values.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 chapterNames = request.chapterNames.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
-                outputFd = output.fd,
-                output = null,
+                outputFd = (output as? EngineFile.Descriptor)?.descriptor?.fd ?: -1,
+                output = (output as? EngineFile.Callbacks)?.file,
                 listener = listener,
             )
             RipOutcome.parse(report.decodeToString())
@@ -154,6 +155,8 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
         }
 
         /** Reads a finished Matroska file back; [file] stays the caller's. */
-        fun probe(file: ParcelFileDescriptor): Result<MkvSummary> = MkvSummary.parse(NativeRip.probe(file.fd, null).decodeToString())
+        fun probe(file: EngineFile): Result<MkvSummary> = MkvSummary.parse(
+            NativeRip.probe((file as? EngineFile.Descriptor)?.descriptor?.fd ?: -1, (file as? EngineFile.Callbacks)?.file).decodeToString(),
+        )
     }
 }

@@ -9,7 +9,10 @@ import be.discrip.core.dvd.DvdAudioStream
 import be.discrip.core.dvd.DvdSubtitleStream
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.format.Formats
+import be.discrip.core.plex.PlexResult
+import be.discrip.rip.NasOutcome
 import be.discrip.rip.RipLabels
+import be.discrip.rip.RipStage
 import be.discrip.rip.RipState
 import be.discrip.ui.settings.currentLocale
 import java.text.NumberFormat
@@ -74,8 +77,15 @@ fun ripStatusLine(state: RipState): String = when (state) {
     RipState.Idle -> ""
     is RipState.Running -> {
         val progress = state.progress
+        val upload = state.upload
         when {
             state.cancelling -> stringResource(R.string.rip_cancelling)
+            state.stage == RipStage.PREPARING -> stringResource(R.string.rip_stage_preparing)
+            state.stage == RipStage.PLEX -> stringResource(R.string.rip_stage_plex)
+            state.stage == RipStage.UPLOADING -> stringResource(
+                R.string.rip_status_uploading,
+                percent(upload?.fraction ?: 0f, currentLocale()),
+            )
             progress == null -> stringResource(R.string.rip_status_starting)
             progress.remainingMs != null -> stringResource(
                 R.string.rip_status_percent_left,
@@ -85,7 +95,9 @@ fun ripStatusLine(state: RipState): String = when (state) {
             else -> stringResource(R.string.rip_status_percent, percent(progress.fraction, currentLocale()))
         }
     }
-    is RipState.Succeeded -> stringResource(R.string.rip_status_done)
+    is RipState.Succeeded -> stringResource(
+        if (state.nas is NasOutcome.Failed) R.string.rip_status_done_upload_failed else R.string.rip_status_done,
+    )
     is RipState.Failed -> stringResource(if (state.reason == RipFailure.CANCELLED) R.string.rip_status_cancelled else R.string.rip_status_failed)
 }
 
@@ -104,3 +116,13 @@ fun failureText(reason: RipFailure): String = stringResource(
         RipFailure.FAILED -> R.string.rip_failure_failed
     },
 )
+
+/** What the user reads when telling Plex about a rip did not work out. */
+fun plexResultText(result: PlexResult): Int = when (result) {
+    PlexResult.ADDED -> R.string.plex_result_added
+    PlexResult.NOT_SEEN -> R.string.rip_plex_not_seen
+    PlexResult.SECTION_MISSING -> R.string.rip_plex_section_missing
+    PlexResult.UNREACHABLE -> R.string.plex_error_unreachable
+    PlexResult.TOKEN_REJECTED -> R.string.rip_plex_token
+    PlexResult.FAILED -> R.string.plex_error_other
+}

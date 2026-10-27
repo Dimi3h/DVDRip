@@ -9,18 +9,14 @@ import be.discrip.core.dvd.MainFeature
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.dvd.RipOutcome
 import be.discrip.core.dvd.RipPlanning
-import be.discrip.core.model.MovieMetadata
-import be.discrip.core.naming.PlexNaming
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import be.discrip.core.history.RipResult
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -28,61 +24,50 @@ import org.junit.runner.RunWith
 import java.io.File
 
 /**
- * Rips the test DVD of native/scripts/make-test-dvd.sh on the device, through the same manager,
- * JNI bridge and native engine as the app. Title 1 is 12 s in two VOBs with chapters at 0, 3 and
- * 6 s, an English AC-3 track and a Dutch LPCM track; title 2 is 3 s.
+ * Rips the test DVD of native/scripts/make-test-dvd.sh on the device into a local folder, through
+ * the same manager, JNI bridge and native engine as the app (see [RipTestRig]).
  */
 @RunWith(AndroidJUnit4::class)
 class RipEndToEndTest {
 
-    private val target = InstrumentationRegistry.getInstrumentation().targetContext
-    private val testAssets = InstrumentationRegistry.getInstrumentation().context.assets
-    private lateinit var work: File
-    private lateinit var scope: CoroutineScope
-    private lateinit var manager: RipManager
-    private lateinit var image: DvdSource
+    private lateinit var rig: RipTestRig
+    private val manager get() = rig.manager
+    private val work get() = rig.work
+    private val target get() = rig.target
+    private val image get() = rig.image
 
     @Before
     fun setUp() {
-        work = File(target.cacheDir, "rip-test").apply {
-            deleteRecursively()
-            mkdirs()
-        }
-        copyAsset("test-dvd.iso", File(work, "test-dvd.iso"))
-        image = DvdSource.Image(Uri.fromFile(File(work, "test-dvd.iso")))
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        manager = RipManager(target.contentResolver, target.cacheDir, RipLabels(target), scope, FileOutputs(File(work, "out")))
+        rig = RipTestRig("rip-test")
     }
 
     @After
-    fun tearDown() = runBlocking {
-        manager.close(image)?.join()
-        scope.cancel()
-        work.deleteRecursively()
-        Unit
-    }
+    fun tearDown() = rig.close()
 
     @Test
     fun ripsTheImageLosslesslyIntoAPlexNamedFile() = runBlocking {
-        val ready = openImage()
+        val ready = rig.openImage()
         assertEquals("DISCRIP_TEST_DVD", ready.name)
         assertEquals(listOf(1, 2), ready.titles.map { it.number })
         val title = ready.mainTitle!!
         assertEquals(1, title.number)
         assertEquals(listOf(0L, 3000L, 6000L), title.chapterStartsMs)
 
-        val job = job(ready, lpcmToFlac = false)
+        val job = rig.job(ready)
+        assertEquals(listOf(AudioCodec.LPCM, AudioCodec.AC3), job.audio.map { it.codec })
         assertEquals(listOf("dut", "eng"), job.audio.map { it.language })
-        assertTrue(manager.start(job))
-        val done = withTimeout(RIP_TIMEOUT) { manager.rip.first { it !is RipState.Running } }
+        val done = rig.ripAndWait(job)
         assertTrue(done.toString(), done is RipState.Succeeded)
         done as RipState.Succeeded
 
-        val file = File(work, "out/Films/Testfilm (2024) {tmdb-603}/Testfilm (2024) {tmdb-603}.mkv")
+        val file = File(rig.out, "Films/Testfilm (2024) {tmdb-603}/Testfilm (2024) {tmdb-603}.mkv")
         assertTrue(file.isFile)
         assertFalse(File(file.path + ".part").exists())
         assertEquals(done.result.outputBytes, file.length())
         assertEquals(emptyList<Any>(), done.result.badSectors)
+        assertEquals("Movies/Films/Testfilm (2024) {tmdb-603}/Testfilm (2024) {tmdb-603}.mkv", done.localFile)
+        assertNull(done.nas)
+        assertNull(done.plex)
 
         val summary = done.file
         assertEquals(listOf("mpeg2video"), summary.video.map { it.codec })
@@ -98,36 +83,41 @@ class RipEndToEndTest {
         assertEquals(3, summary.chapterStartsMs.size)
         assertEquals(6000.0, summary.chapterStartsMs[2].toDouble(), 40.0)
         assertEquals(12_000.0, summary.durationMs.toDouble(), 100.0)
+
+        val record = rig.history.load().single()
+        assertEquals(RipResult.SUCCEEDED, record.result)
+        assertEquals("Testfilm", record.title)
+        assertEquals(done.result.outputBytes, record.bytes)
+        assertEquals(done.localFile, record.localFile)
+        assertNull(record.nasFile)
     }
 
     @Test
     fun convertsLpcmToFlacWhenAsked() = runBlocking {
-        val ready = openImage()
-        assertTrue(manager.start(job(ready, lpcmToFlac = true)))
-        val done = withTimeout(RIP_TIMEOUT) { manager.rip.first { it !is RipState.Running } }
+        val done = rig.ripAndWait(rig.job(rig.openImage(), lpcmToFlac = true))
         assertTrue(done.toString(), done is RipState.Succeeded)
         assertEquals(listOf("flac", "ac3"), (done as RipState.Succeeded).file.audio.map { it.codec })
     }
 
     @Test
     fun aCancelledRipLeavesNoFile() = runBlocking {
-        val ready = openImage()
-        assertTrue(manager.start(job(ready, lpcmToFlac = false)))
+        val ready = rig.openImage()
+        assertTrue(manager.start(rig.job(ready)))
         manager.cancel()
-        val done = withTimeout(RIP_TIMEOUT) { manager.rip.first { it !is RipState.Running } }
+        val done = withTimeout(RipTestRig.RIP_TIMEOUT) { manager.rip.first { it !is RipState.Running } }
         assertEquals(RipFailure.CANCELLED, (done as RipState.Failed).reason)
-        assertEquals(emptyList<File>(), File(work, "out").walk().filter { it.isFile }.toList())
+        assertEquals(emptyList<File>(), rig.filesIn(rig.out))
+        assertEquals(RipResult.CANCELLED, rig.history.load().single().result)
     }
 
     @Test
     fun aRipThatCannotFitDoesNotStart() = runBlocking {
-        val ready = openImage()
-        assertTrue(manager.start(job(ready, lpcmToFlac = false, estimatedBytes = Long.MAX_VALUE / 4)))
-        val done = withTimeout(RIP_TIMEOUT) { manager.rip.first { it !is RipState.Running } }
+        val done = rig.ripAndWait(rig.job(rig.openImage(), estimatedBytes = Long.MAX_VALUE / 4))
         done as RipState.Failed
         assertEquals(RipFailure.NO_SPACE, done.reason)
         assertTrue(done.neededBytes!! > done.freeBytes!!)
-        assertEquals(emptyList<File>(), File(work, "out").walk().filter { it.isFile }.toList())
+        assertNull(done.nasProblem)
+        assertEquals(emptyList<File>(), rig.filesIn(rig.out))
     }
 
     @Test
@@ -140,7 +130,7 @@ class RipEndToEndTest {
             val output = File(work, "cancelled.mkv")
             val request = RipRequest(title.number, audio = emptyList(), lpcmToFlac = false, movieTitle = null, releaseDate = null, chapterNames = emptyList())
             var reports = 0
-            val outcome = ParcelFileDescriptor.open(output, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE).use { file ->
+            val outcome = descriptor(output).use { file ->
                 // The engine reports progress with its first packet; cancelling there stops it mid-title.
                 session.rip(request, file, isCancelled = { false }) { _, _, _, _ ->
                     reports++
@@ -154,7 +144,7 @@ class RipEndToEndTest {
 
     @Test
     fun readsAVideoTsFolderLikeTheImage() = runBlocking {
-        val imageTitles = openImage().titles
+        val imageTitles = rig.openImage().titles
         manager.close(image)?.join()
         copyAssetTree("folder", File(work, "folder"))
 
@@ -165,7 +155,7 @@ class RipEndToEndTest {
             val extra = titles.single { it.number == 2 }
             val audio = RipPlanning.audioTracks(extra).map { RipTrack(it.streamId, it.language, null, it.flags) }
             val request = RipRequest(2, audio = audio, lpcmToFlac = false, movieTitle = "Extra", releaseDate = null, chapterNames = emptyList())
-            ParcelFileDescriptor.open(output, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE).use { file ->
+            descriptor(output).use { file ->
                 val outcome = session.rip(request, file, isCancelled = { false }) { _, _, _, _ -> }
                 assertTrue(outcome.toString(), outcome is RipOutcome.Success)
                 assertEquals(3000.0, (outcome as RipOutcome.Success).durationMs.toDouble(), 50.0)
@@ -178,78 +168,26 @@ class RipEndToEndTest {
     fun aMissingImageIsReportedNotThrown() = runBlocking {
         val missing = DvdSource.Image(Uri.fromFile(File(work, "missing.iso")))
         manager.open(missing)
-        val state = withTimeout(OPEN_TIMEOUT) { manager.source.first { it is SourceState.Ready || it is SourceState.Failed } }
+        val state = withTimeout(RipTestRig.OPEN_TIMEOUT) { manager.source.first { it is SourceState.Ready || it is SourceState.Failed } }
         assertEquals(SourceProblem.CANNOT_OPEN, (state as SourceState.Failed).problem)
     }
 
-    private suspend fun openImage(): SourceState.Ready {
-        manager.open(image)
-        val state = withTimeout(OPEN_TIMEOUT) { manager.source.first { it is SourceState.Ready || it is SourceState.Failed } }
-        assertTrue(state.toString(), state is SourceState.Ready)
-        return state as SourceState.Ready
-    }
-
-    private fun job(ready: SourceState.Ready, lpcmToFlac: Boolean, estimatedBytes: Long = 0): RipJob {
-        val title = ready.mainTitle!!
-        val metadata = MovieMetadata(title = "Testfilm", year = 2024, tmdbId = 603)
-        val audio = RipPlanning.audioTracks(title)
-        assertEquals(listOf(AudioCodec.LPCM, AudioCodec.AC3), audio.map { it.codec })
-        val subtitles = RipPlanning.subtitleTracks(title)
-        return RipJob(
-            source = image,
-            sourceName = ready.name,
-            metadata = metadata,
-            title = title,
-            audio = audio,
-            subtitles = subtitles,
-            lpcmToFlac = lpcmToFlac,
-            estimatedBytes = estimatedBytes,
-            path = PlexNaming.plan(metadata, "Films"),
-            treeUri = "",
-        )
-    }
+    private fun descriptor(file: File): EngineFile = EngineFile.Descriptor(
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE),
+    )
 
     private fun copyAsset(name: String, to: File) {
         to.parentFile?.mkdirs()
-        testAssets.open(name).use { input -> to.outputStream().use { input.copyTo(it) } }
+        InstrumentationRegistry.getInstrumentation().context.assets.open(name).use { input -> to.outputStream().use { input.copyTo(it) } }
     }
 
     private fun copyAssetTree(path: String, to: File) {
-        val children = testAssets.list(path).orEmpty()
+        val children = InstrumentationRegistry.getInstrumentation().context.assets.list(path).orEmpty()
         if (children.isEmpty()) {
             copyAsset(path, to)
         } else {
             to.mkdirs()
             for (child in children) copyAssetTree("$path/$child", File(to, child))
-        }
-    }
-
-    private companion object {
-        const val OPEN_TIMEOUT = 60_000L
-        const val RIP_TIMEOUT = 180_000L
-    }
-}
-
-/** Writes rips under [root] with the same .part-then-rename steps as [LocalOutput]. */
-private class FileOutputs(private val root: File) : RipOutputs {
-    override fun create(job: RipJob): RipOutput {
-        val target = File(root, job.path.relativeFile)
-        target.parentFile!!.mkdirs()
-        val part = File(target.path + ".part")
-        part.delete()
-        part.createNewFile()
-        return object : RipOutput {
-            override fun open(): ParcelFileDescriptor =
-                ParcelFileDescriptor.open(part, ParcelFileDescriptor.MODE_READ_WRITE)
-
-            override fun complete() {
-                target.delete()
-                check(part.renameTo(target)) { "Renaming $part failed" }
-            }
-
-            override fun discard() {
-                part.delete()
-            }
         }
     }
 }

@@ -9,23 +9,6 @@ import be.discrip.core.naming.RipPath
 import java.io.FileNotFoundException
 import java.io.IOException
 
-/** Where a rip's file is written. */
-interface RipOutput {
-    /** Opens the file for the engine, which reads back and seeks while writing. */
-    fun open(): ParcelFileDescriptor
-
-    /** Gives the finished file its final name, replacing an earlier rip of the same film. */
-    fun complete()
-
-    /** Removes the unfinished file. */
-    fun discard()
-}
-
-/** Makes the [RipOutput] of a job; the app writes into the local folder with [LocalOutput]. */
-fun interface RipOutputs {
-    fun create(job: RipJob): RipOutput
-}
-
 /**
  * The MKV a rip writes into the local folder. It is created as `<name>.part` in the movie folder
  * and renamed when the rip is complete, so Plex or a file manager never sees half a film under
@@ -37,14 +20,18 @@ class LocalOutput private constructor(
     private val fileName: String,
     document: Uri,
     private val temporary: Boolean,
-) : RipOutput {
+) : LocalRipOutput {
 
     /** The file; after [complete], under its final name. */
     var document: Uri = document
         private set
 
-    override fun open(): ParcelFileDescriptor =
-        resolver.openFileDescriptor(document, "rw") ?: throw FileNotFoundException("Cannot open $document")
+    override fun open(): EngineFile = EngineFile.Descriptor(
+        resolver.openFileDescriptor(document, "rw") ?: throw FileNotFoundException("Cannot open $document"),
+    )
+
+    override fun read(): ParcelFileDescriptor =
+        resolver.openFileDescriptor(document, "r") ?: throw FileNotFoundException("Cannot open $document")
 
     override fun complete() {
         if (!temporary) return

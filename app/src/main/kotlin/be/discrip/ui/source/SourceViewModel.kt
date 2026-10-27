@@ -12,12 +12,16 @@ import be.discrip.core.dvd.RipPlanning
 import be.discrip.core.dvd.SubtitleTrackPlan
 import be.discrip.core.estimate.SizeEstimator
 import be.discrip.core.model.MovieMetadata
-import be.discrip.core.naming.PlexNaming
+import be.discrip.core.model.StorageTarget
 import be.discrip.core.naming.RipPath
+import be.discrip.core.nas.Nas
+import be.discrip.core.nas.NasException
+import be.discrip.core.nas.NasProblem
 import be.discrip.core.settings.AppSettings
 import be.discrip.data.FreeSpace
 import be.discrip.rip.DvdSource
 import be.discrip.rip.LocalOutput
+import be.discrip.rip.RipDestination
 import be.discrip.rip.RipJob
 import be.discrip.rip.RipState
 import be.discrip.rip.SourceState
@@ -46,10 +50,16 @@ data class SourceUiState(
     val showAllTitles: Boolean,
     val metadata: MovieMetadata?,
     val settings: AppSettings,
+    /** Where this rip goes; the default from the settings until the user picks another. */
+    val storage: StorageTarget,
     val folderAccess: FolderAccess,
     /** Free space in the local folder, when its storage can tell. */
-    val freeBytes: Long?,
+    val localFreeBytes: Long?,
+    /** Free space in the app's own storage, where a NAS rip waits for its upload. */
+    val appFreeBytes: Long?,
     val ripRunning: Boolean,
+    /** The start button is checking the NAS. */
+    val starting: Boolean = false,
 ) {
     val ready: SourceState.Ready? get() = source as? SourceState.Ready
 
@@ -72,8 +82,29 @@ data class SourceUiState(
     val subtitles: List<SubtitleTrackPlan>
         get() = title?.let { RipPlanning.subtitleTracks(it, selection.subtitles) }.orEmpty()
 
-    /** Where the file goes in the local folder; this version always rips there. */
-    val path: RipPath? get() = metadata?.let { PlexNaming.plan(it, settings.local.baseFolder(it.kind)) }
+    /** Where the file goes; null without metadata, or while a part [storage] needs is not set up. */
+    val destination: RipDestination? get() = metadata?.let { RipDestination.plan(settings, storage, it) }
+
+    /** The film's folder and file in the local folder, or else on the share. */
+    val path: RipPath? get() = destination?.let { it.local?.path ?: it.nas?.path }
+
+    /** The local folder is needed but not usable. */
+    val needsFolder: Boolean get() = storage.usesLocalFolder && folderAccess != FolderAccess.GRANTED
+
+    /** The NAS is needed but its host or share is missing in the settings. */
+    val needsNas: Boolean get() = storage.usesNas && !settings.nas.isConfigured
+
+    /**
+     * Free space where the engine writes on this device: the local folder, the app's storage for
+     * a NAS rip that uploads afterwards, nothing for one written straight to the NAS (its space is
+     * checked at the start).
+     */
+    val freeBytes: Long?
+        get() = when {
+            storage.usesLocalFolder -> localFreeBytes
+            settings.nas.writeDirectly -> null
+            else -> appFreeBytes
+        }
 
     val estimatedBytes: Long?
         get() = title?.let { RipEstimate.losslessBytes(it, audio, subtitles, settings.convertLpcmToFlac) }
@@ -93,8 +124,15 @@ data class SourceUiState(
 sealed interface StartCheck {
     data object NeedsMetadata : StartCheck
     data object NeedsFolder : StartCheck
+    data object NeedsNas : StartCheck
     data object NotEnoughSpace : StartCheck
     data object Busy : StartCheck
+
+    /** The NAS cannot take the rip: unreachable, login refused, and so on. */
+    data class NasUnavailable(val problem: NasProblem) : StartCheck
+
+    /** The share has less room than the rip needs. */
+    data class NasFull(val neededBytes: Long, val freeBytes: Long) : StartCheck
 
     /** A file of an earlier rip is in the way; ask before replacing it. */
     data class Exists(val job: RipJob) : StartCheck
@@ -105,27 +143,36 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
 
     private val selection = MutableStateFlow(TrackSelection())
     private val showAllTitles = MutableStateFlow(false)
-    private val folderAccess = MutableStateFlow(FolderAccess.NONE)
-    private val freeBytes = MutableStateFlow<Long?>(null)
+    private val storageChoice = MutableStateFlow<StorageTarget?>(null)
+    private val starting = MutableStateFlow(false)
+    private val space = MutableStateFlow(Space())
+
+    /** What [refreshFolder] found. */
+    private data class Space(val access: FolderAccess = FolderAccess.NONE, val local: Long? = null, val app: Long? = null)
 
     val state: StateFlow<SourceUiState?> = combine(
         combine(container.rips.source, container.rips.rip, ::Pair),
         container.ripDraft.metadata,
         container.settingsRepository.settings,
-        combine(selection, showAllTitles, ::Pair),
-        combine(folderAccess, freeBytes, ::Pair),
-    ) { (source, rip), metadata, settings, (chosen, showAll), (access, free) ->
+        combine(selection, showAllTitles, storageChoice, starting, ::Choices),
+        space,
+    ) { (source, rip), metadata, settings, choices, found ->
         SourceUiState(
             source = if (source.sourceOrNull == dvd) source else SourceState.Opening(dvd),
-            selection = chosen,
-            showAllTitles = showAll,
+            selection = choices.selection,
+            showAllTitles = choices.showAll,
             metadata = metadata,
             settings = settings,
-            folderAccess = access,
-            freeBytes = free,
+            storage = choices.storage ?: settings.defaultStorage,
+            folderAccess = found.access,
+            localFreeBytes = found.local,
+            appFreeBytes = found.app,
             ripRunning = rip is RipState.Running,
+            starting = choices.starting,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private data class Choices(val selection: TrackSelection, val showAll: Boolean, val storage: StorageTarget?, val starting: Boolean)
 
     init {
         container.rips.open(dvd)
@@ -148,6 +195,11 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
         showAllTitles.value = show
     }
 
+    /** Where this rip goes, instead of the default from the settings. */
+    fun setStorage(storage: StorageTarget) {
+        storageChoice.value = storage
+    }
+
     fun retry() = container.rips.open(dvd)
 
     /** Called on every resume: the folder grant can be withdrawn and the space used while the app is away. */
@@ -159,24 +211,28 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
                 withContext(Dispatchers.IO) { container.localFolders.hasAccess(uri) } -> FolderAccess.GRANTED
                 else -> FolderAccess.REVOKED
             }
-            folderAccess.value = access
-            freeBytes.value = if (access == FolderAccess.GRANTED && uri != null) {
+            val local = if (access == FolderAccess.GRANTED && uri != null) {
                 withContext(Dispatchers.IO) { FreeSpace.of(container.appContext, uri.toUri()) }
             } else {
                 null
             }
+            space.value = Space(access, local, withContext(Dispatchers.IO) { FreeSpace.ofAppStorage(container.appContext) })
         }
     }
 
+    /**
+     * Checks what the rip needs before it starts. For the NAS that means connecting to it: is it
+     * there, does the login work, is there room, and is an earlier rip of the film in the way.
+     */
     suspend fun prepareStart(): StartCheck {
         val current = state.value ?: return StartCheck.Busy
         val title = current.title ?: return StartCheck.Busy
         val metadata = current.metadata ?: return StartCheck.NeedsMetadata
-        val path = current.path ?: return StartCheck.NeedsMetadata
-        val treeUri = current.settings.local.treeUri
-        if (current.folderAccess != FolderAccess.GRANTED || treeUri == null) return StartCheck.NeedsFolder
+        if (current.needsFolder) return StartCheck.NeedsFolder
+        if (current.needsNas) return StartCheck.NeedsNas
+        val destination = current.destination ?: return StartCheck.NeedsMetadata
         if (!current.enoughSpace) return StartCheck.NotEnoughSpace
-        if (current.ripRunning) return StartCheck.Busy
+        if (current.ripRunning || current.starting) return StartCheck.Busy
         val job = RipJob(
             source = dvd,
             sourceName = current.ready?.name,
@@ -186,13 +242,34 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
             subtitles = current.subtitles,
             lpcmToFlac = current.settings.convertLpcmToFlac,
             estimatedBytes = current.estimatedBytes ?: 0,
-            path = path,
-            treeUri = treeUri,
+            destination = destination,
         )
-        val exists = withContext(Dispatchers.IO) {
-            runCatching { LocalOutput.existing(container.appContentResolver, treeUri.toUri(), path) != null }.getOrDefault(false)
+        val local = destination.local
+        val localExists = local != null && withContext(Dispatchers.IO) {
+            runCatching { LocalOutput.existing(container.appContentResolver, local.treeUri.toUri(), local.path) != null }.getOrDefault(false)
         }
-        return if (exists) StartCheck.Exists(job) else StartCheck.Ready(job)
+        val nas = destination.nas ?: return if (localExists) StartCheck.Exists(job) else StartCheck.Ready(job)
+
+        starting.value = true
+        val needed = current.neededBytes ?: 0
+        val password = container.secretStore.load().nasPassword
+        return try {
+            withContext(Dispatchers.IO) {
+                Nas.connect(nas.target(password)).use { share ->
+                    share.checkWritable(nas.path.baseSegments)
+                    val free = share.freeBytes()
+                    when {
+                        free < needed -> StartCheck.NasFull(needed, free)
+                        localExists || share.exists(nas.path.relativeFile) -> StartCheck.Exists(job)
+                        else -> StartCheck.Ready(job)
+                    }
+                }
+            }
+        } catch (e: NasException) {
+            StartCheck.NasUnavailable(e.problem)
+        } finally {
+            starting.value = false
+        }
     }
 
     fun start(job: RipJob): Boolean = container.rips.start(job)

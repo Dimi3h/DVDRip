@@ -31,3 +31,16 @@
     int read(byte[], int, long);
     long size();
 }
+
+# smbj (the NAS client) reports connection events through mbassador, which finds the receiving
+# methods by their @Handler annotation and calls them, and creates its own handler invocations,
+# by reflection.
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault
+-keepclassmembers class com.hierynomus.** {
+    @net.engio.mbassy.listener.Handler <methods>;
+}
+-keep class net.engio.mbassy.** { *; }
+# Never used on Android: smbj's Kerberos authenticator (it signs in with NTLM there) and
+# mbassador's optional expression-language filters.
+-dontwarn org.ietf.jgss.**
+-dontwarn javax.el.**

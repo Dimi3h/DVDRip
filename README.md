@@ -17,7 +17,7 @@ The app is built in phases; every phase ends with a buildable app and passing te
 | 2 | USB layer: enumerate the drive, INQUIRY, detect the disc, read sector 16 and show the volume label; fake block device backed by an ISO | done |
 | 3 | Native build (libdvdread, libdvdcss, FFmpeg), JNI bridge, ISO to MKV end to end with the lossless preset | done |
 | 4 | Main-feature detection, audio and subtitle selection, chapters, tags, size estimates, free-space check | done |
-| 5 | SMB upload, Plex refresh and verification, "Beide" mode, history | planned |
+| 5 | SMB upload, Plex refresh and verification, "Beide" mode, history | done |
 | 6 | Real USB drive, foreground service, eject, batch flow | planned |
 | 7 | Lossy presets: MediaCodec encoders, yadif, aspect ratio, H.264 fallback, LPCM to FLAC | planned |
 
@@ -121,6 +121,33 @@ authentication, comes in phase 6 (see "CSS on real drives" below).
 - **Read back**: the result screen lists the subtitle tracks found in the finished file next to
   the audio, and the tags are checked in the instrumented test.
 
+### What phase 5 contains
+
+- **"Bewaren op" per rip**: on the source screen, Lokaal, NAS or Beide, starting from the default
+  in Instellingen › Bewaren. The screen shows the folder in the local folder and on the share.
+- **NAS** (SMB 2 and 3, such as a Synology): a NAS rip goes into the app's own storage first, is
+  read back, uploaded as `<name>.mkv.part`, its size on the NAS compared with the size on the phone,
+  renamed, and only then removed from the phone. With "Rechtstreeks naar de NAS" on, the engine
+  writes to the share itself and reads the file back from there. "Beide" rips into the local folder
+  and uploads a copy. The upload shows percentage, speed, time left and bytes, and can be stopped.
+- **Checks before the rip**: the start button connects to the NAS, signs in, writes and removes a
+  small file in the films folder and compares the free space with the estimate, so a NAS that is
+  off, a refused login, an unknown share, a read-only folder or a full share are reported before
+  the rip. Instellingen › NAS has the same check as "Verbinding testen". A host may carry a port
+  (`nas.local:1445`).
+- **Plex**: after the upload, Plex is asked to scan just the film's folder, worked out from the
+  library's folders as Plex sees them (`/volume1/video/Films`); the app waits until the library
+  lists the file. A rejected token, a library that is gone or a film that does not show up are
+  named on the result screen; "Niet wachten op Plex" stops waiting.
+- **Result**: where the file is (local folder, `smb://nas/share/…`) and what Plex made of it.
+- **History** (tab "Geschiedenis"): every rip with date, disc, size, target, result, unreadable
+  sectors and notes. A rip whose upload failed waits in the app's storage (or, for Beide, in the
+  local folder) and can be uploaded again from here, or given up.
+- **Under the hood**: the NAS client on smbj in `core` (with errors for each case above), the
+  engine's output and read-back through `dr_file` (a descriptor or JNI callbacks), the Plex path
+  mapping and scan check, and the history as JSON. Tested against a real Samba server, in `core`
+  and on the emulator, with a MockWebServer playing Plex.
+
 ## Building
 
 Requirements:
@@ -142,6 +169,8 @@ Requirements:
 - For the native engine tests on the build machine and for the instrumented tests: ffmpeg,
   dvdauthor and genisoimage, which author the test DVD, and for `test-engine.sh` also CMake, Ninja
   and nasm (Debian/Ubuntu: `apt install ffmpeg dvdauthor genisoimage cmake ninja-build nasm`).
+- For the NAS tests: Samba (`apt install samba`) and root or sudo, for the throw-away server of
+  `scripts/samba-test-server.sh`.
 
 Toolchain: Android Gradle plugin 9.4 with its built-in Kotlin support, Kotlin 2.4, Compose BOM
 2026.09. `compileSdk` is 37 because current AndroidX, Compose and OkHttp releases require it;
@@ -158,6 +187,27 @@ native/scripts/test-engine.sh           # rip engine on the build machine, plain
 ./gradlew :app:connectedDebugAndroidTest   # on a connected arm64 phone or an API 30+ emulator
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+The NAS tests need an SMB server. `scripts/samba-test-server.sh start /tmp/discrip-samba` starts
+a throw-away Samba server on 127.0.0.1:1445 (shares `video` and `readonly`, user `discriptest`) and
+prints the environment the core tests read; `stop` ends it. The folder must be reachable for other
+users (Samba writes as `discriptest`), which a private home or temp folder may not be:
+
+```sh
+eval "$(scripts/samba-test-server.sh start /tmp/discrip-samba | sed 's/^/export /')"
+./gradlew -p core smbTest               # the NAS client against that server
+./gradlew :app:connectedDebugAndroidTest \
+    -Pandroid.testInstrumentationRunnerArguments.smbHost=10.0.2.2 \
+    -Pandroid.testInstrumentationRunnerArguments.smbPort=$DISCRIP_SMB_PORT \
+    -Pandroid.testInstrumentationRunnerArguments.smbShare=$DISCRIP_SMB_SHARE \
+    -Pandroid.testInstrumentationRunnerArguments.smbReadOnlyShare=$DISCRIP_SMB_READONLY_SHARE \
+    -Pandroid.testInstrumentationRunnerArguments.smbUser=$DISCRIP_SMB_USER \
+    -Pandroid.testInstrumentationRunnerArguments.smbPassword=$DISCRIP_SMB_PASSWORD
+```
+
+An emulator reaches the machine it runs on as 10.0.2.2; a phone needs the machine's address on the
+network, and the server bound to it (it listens on `lo` only). Without `smbHost` the instrumented
+NAS tests are skipped; CI fails on skipped tests, so there they always run.
 
 The native scripts can also be used on their own: `native/scripts/make-test-dvd.sh out.iso folder`
 authors the test DVD, and `discrip_host` (in `native/build/host/` after `test-engine.sh`) lists
@@ -185,13 +235,15 @@ them that way and the CMake build asks for it explicitly; `python3 scripts/check
 app/build/outputs/apk/debug/app-debug.apk` checks the ELF segments and their placement in the APK.
 
 **CI.** `.github/workflows/ci.yml` runs on every push, on Ubuntu 24.04 runners (pinned so the
-preinstalled NDK and CMake match): core tests; the rip engine tests on the runner
-(`native/scripts/test-engine.sh`); app unit tests, the debug and release APKs (the debug one is
-uploaded as the `discrip-debug-apk` artifact), lint and the 16 KB alignment check; instrumented
-tests on an API 30 x86_64 emulator, whose ARM translation runs the arm64-only app, including the
-end-to-end rip of the test DVD; and a report of which pinned dependencies have newer stable
-releases (`python3 scripts/dependency_report.py` does the same locally). The third-party sources
-and the FFmpeg builds are cached between runs.
+preinstalled NDK and CMake match): core tests, and the NAS client against a Samba server on the
+runner; the rip engine tests on the runner (`native/scripts/test-engine.sh`); app unit tests, the
+debug and release APKs (the debug one is uploaded as the `discrip-debug-apk` artifact), lint and
+the 16 KB alignment check; instrumented tests on an API 30 x86_64 emulator, whose ARM translation
+runs the arm64-only app, including the end-to-end rips of the test DVD to a local folder and to
+the runner's Samba server; and a report of which pinned dependencies have newer stable releases
+(`python3 scripts/dependency_report.py` does the same locally). The third-party sources and the
+FFmpeg builds are cached between runs. The emulator needs 7.4 GB free next to the build, so the
+job first removes toolchains it does not use (.NET, GHC, CodeQL, Swift).
 
 ## Credentials
 
@@ -202,8 +254,8 @@ backup and device transfer so they never leave the phone.
 | What | Where to get it | Used for |
 |---|---|---|
 | TMDB API key (v3) or API read access token (v4) | themoviedb.org, account Settings, API | Searching films, localized titles, posters, ids |
-| NAS user and password | Synology DSM, a user with write access to the share; SMB service enabled (SMB 2 or 3) | Uploads (phase 5) |
-| Plex token | Plex Web, open a film, ⋯, Get Info, View XML: the `X-Plex-Token` value in the address | Fetching library sections, refreshing and verifying (phase 5) |
+| NAS user and password | Synology DSM, a user with read and write access to the share; Control Panel › File Services › SMB enabled (SMB 2 or 3) | Rips to the NAS |
+| Plex token | Plex Web, open a film, ⋯, Get Info, View XML: the `X-Plex-Token` value in the address | Fetching library sections, scanning and checking new rips |
 
 The Plex server address may be given as `192.168.1.10`, `nas.local:32400` or a full URL; without a
 scheme the app uses `http://` and port 32400. Cleartext HTTP is allowed because a Plex server on the
@@ -217,7 +269,9 @@ core/                     Platform-independent Kotlin (separate Gradle build, Ma
   naming/                 Plex naming and file name sanitizing
   estimate/               Size estimates and the free-space margin
   tmdb/                   TMDB client and volume label normalizer
-  plex/                   Plex client
+  plex/                   Plex client, path mapping and the scan-and-check of new rips
+  nas/                    SMB client on smbj: folders, uploads, random-access files, errors
+  history/                The rip history's records and JSON
   settings/               AppSettings (everything except secrets)
   usb/                    Bulk-Only Transport: CBW/CSW, reset recovery, the BulkTransport interface
   scsi/                   SCSI/MMC command builders, response parsers, OpticalDrive
@@ -226,21 +280,23 @@ core/                     Platform-independent Kotlin (separate Gradle build, Ma
   src/test/.../testing/   Simulated USB drive and disc images for the tests
   src/test/resources/images/  Disc image fixtures and the script that makes them
 app/                      Android app
-  data/                   DataStore settings, encrypted secrets, local folder grants
+  data/                   DataStore settings, encrypted secrets, local folder grants, history file
   usb/                    libusb and Java USB transports, mass-storage interface lookup
   drive/                  DriveManager: discovery, permission, claim, polling
-  rip/                    RipManager, DVD sessions over JNI, SAF folder reader, output files
+  rip/                    RipManager (rip, upload, Plex), DVD sessions over JNI, SAF folder
+                          reader, outputs (local folder, app storage, NAS), destinations
   src/main/cpp/           CMake build of libusb, libdvdcss, libdvdread and the engine
     engine/               The rip engine in C: sources, title plans, VOBU reader, remux to MKV
     jni/, usb_jni.c       JNI bridges for the engine and for libusb
     host/                 discrip_host, the engine's command-line driver for the build machine
     config/               Hand-written config.h for libdvdcss and libdvdread
   ui/theme, ui/components HIG theme and components
-  ui/home, ui/metadata, ui/settings, ui/source, ui/rip, ui/navigation
+  ui/home, ui/metadata, ui/settings, ui/source, ui/rip, ui/history, ui/navigation
 native/scripts/           fetch-sources.sh (pinned, checksummed sources), build-ffmpeg.sh,
                           make-test-dvd.sh, test-engine.sh
 native/tests/             test_engine.py: engine tests against the authored test DVD
-scripts/                  dependency_report.py, check_native_alignment.py, test_summary.py
+scripts/                  dependency_report.py, check_native_alignment.py, test_summary.py,
+                          samba-test-server.sh
 ```
 
 ## Decisions
@@ -361,6 +417,42 @@ These were made without asking because they do not change the architecture; each
 24. **Audio rates for estimates.** The IFO does not record the bit rate of compressed audio, so
     estimates use the rates DVDs use most: AC-3 192 kbit/s for stereo and 448 for 5.1, DTS 768,
     MPEG audio 224; LPCM is calculated exactly. The video rate is what the title's VOB data leaves.
+25. **NAS client: smbj** (0.15.0, Apache 2.0), SMB 2 and 3 in pure Java. jcifs-ng, the other
+    candidate, has had no release since 2023. smbj signs in with NTLM, with MD4 from BouncyCastle
+    because neither Android nor the JDK offer MD4; it leaves Kerberos out on Android. There is no
+    socket read timeout: smbj's reader thread takes one for a dead connection, and the connection
+    sits idle while the drive reads. A NAS that does not accept the connection fails after 5
+    seconds, a request that gets no answer after a minute (enough for disks that spin up first).
+26. **NAS rips go through the phone first**, as specified: rip into the app's own storage, read
+    back, upload as `.part`, compare the size on the NAS after a flush, rename, then delete the
+    local copy. "Rechtstreeks naar de NAS" (off by default) lets the engine write to the share
+    through JNI callbacks (`dr_file`): the muxer's seeks back (sizes, duration, index) and the
+    read-back work over SMB. Without a local copy, a connection lost during the rip fails the rip.
+27. **Checks before the rip.** Connecting, signing in, writing a test file in the films folder and
+    comparing the free space happen when "Rip starten" is tapped and again when the rip starts, so
+    the NAS problems the spec lists are reported before the drive spins, not after an hour.
+28. **A failed upload is not lost.** When the NAS is gone by the time the upload starts, the rip
+    still counts as done: the file stays in the app's storage (NAS) or the local folder (Beide)
+    and the history offers "Opnieuw uploaden". Stopping an upload deletes the staged file of a NAS
+    rip (stopping means stopping); a Beide rip keeps its local copy. Staged files no history entry
+    refers to (left by a crash) are deleted at the next start.
+29. **Plex scans only the new folder.** The library's folders as Plex sees them are matched to the
+    share and folders on the NAS by their last path segments (`/volume1/video/Films` for share
+    `video`, folder `Films`; `D:\Films` or `\\nas\video\Films` for Plex on Windows), and Plex is
+    asked to scan just the film's folder (`/library/sections/<key>/refresh?path=…`). When no folder
+    matches, or the film does not show up within a minute, the whole library is scanned. A rip
+    counts as found when the newest items of the library include a file with its name; after two
+    minutes the app stops waiting and says so. Plex problems never undo a rip.
+30. **History** as JSON in the app's storage: finished, failed and cancelled rips, the last 500. A
+    damaged file is set aside as `history.json.broken` rather than silently dropped.
+31. **NAS paths are shown as `smb://host/share/…`**, the form Android and iOS file managers use.
+32. **R8 and smbj.** smbj receives connection events through mbassador, which finds the handler
+    methods by annotation; those methods and mbassador are kept. Kerberos (`org.ietf.jgss`) and
+    mbassador's EL filters (`javax.el`) do not exist on Android and are never used there.
+33. **Tests against real servers.** The NAS client is tested against a throw-away Samba server
+    (`scripts/samba-test-server.sh`), in `core` and from the emulator, which reaches the runner as
+    10.0.2.2; a MockWebServer on the device plays Plex. The instrumented test summary fails on
+    skipped tests, so the NAS tests cannot drop out unnoticed.
 
 ## CSS on real drives (phase 6)
 
@@ -423,6 +515,28 @@ Phase 4 on a phone:
    sit on a title without "scènes door elkaar", and its rip should play the scenes in order.
 4. Fill the local folder until less than the estimate is free: the start button stays disabled
    and the footer gives the numbers.
+
+Phase 5 with a Synology and Plex:
+
+1. In DSM, enable SMB (Control Panel › File Services › SMB) and give a user read and write access
+   to the `video` share. In Plex, make sure the film library includes the folder the rips go to
+   (for example `/volume1/video/Films`).
+2. In Instellingen › NAS, enter the NAS's address, `video`, the user and the password, and tap
+   "Verbinding testen": "Verbonden en schrijven mag" with the free space. Try a wrong password and
+   a share without write access: each gets its own message.
+3. In Instellingen › Plex, enter the address and token, load the libraries and choose the film
+   library.
+4. Rip an image with "Bewaren op: NAS": the progress shows the rip, then the upload, then "Wachten
+   tot Plex de film toont…". The result lists `smb://…` and "In de bibliotheek als …"; the film
+   appears in Plex within seconds, without a full library scan (Plex's log shows a scan of one
+   folder). Nothing is left in the app's storage.
+5. Repeat with "Beide": the MKV is in the local folder and on the NAS. Repeat with "Rechtstreeks
+   naar de NAS" on.
+6. Switch the NAS off and tap "Rip starten": "De NAS is niet bereikbaar". Switch it off during a NAS
+   rip instead: the rip finishes, the upload fails, and Geschiedenis shows "Wacht". Switch the NAS
+   on again and tap "Opnieuw uploaden".
+7. Change the Plex token to a wrong one: the rip still succeeds and the result says Plex refuses
+   the token.
 
 ## Privacy
 

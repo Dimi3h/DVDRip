@@ -6,6 +6,9 @@ import kotlinx.serialization.Serializable
 data object HomeRoute
 
 @Serializable
+data object HistoryRoute
+
+@Serializable
 data object SettingsRoute
 
 /** [volumeLabel] seeds the TMDB search; null when the screen is opened without a disc. */

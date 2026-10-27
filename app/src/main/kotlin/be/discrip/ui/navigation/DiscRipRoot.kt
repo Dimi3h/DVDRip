@@ -31,6 +31,7 @@ import be.discrip.AppContainer
 import be.discrip.R
 import be.discrip.ui.components.HigTabBar
 import be.discrip.ui.components.TabItem
+import be.discrip.ui.history.HistoryScreen
 import be.discrip.ui.home.HomeScreen
 import be.discrip.ui.icons.HigIcons
 import be.discrip.rip.DvdSource
@@ -50,7 +51,7 @@ private val pushEasing = CubicBezierEasing(0.2f, 0.9f, 0.3f, 1f)
 private const val PUSH_MILLIS = 380
 
 private fun NavDestination?.isTabRoot(): Boolean =
-    this != null && (hasRoute(HomeRoute::class) || hasRoute(SettingsRoute::class))
+    this != null && (hasRoute(HomeRoute::class) || hasRoute(HistoryRoute::class) || hasRoute(SettingsRoute::class))
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.isTabSwitch(): Boolean =
     initialState.destination.isTabRoot() && targetState.destination.isTabRoot()
@@ -99,8 +100,13 @@ fun DiscRipRoot(container: AppContainer) {
                     )
                 }
             }
-            composable<SettingsRoute> {
+            composable<HistoryRoute> {
                 TabRoot(navController, selected = 1) { bottomPadding ->
+                    HistoryScreen(container = container, bottomPadding = bottomPadding)
+                }
+            }
+            composable<SettingsRoute> {
+                TabRoot(navController, selected = 2) { bottomPadding ->
                     SettingsScreen(
                         container = container,
                         bottomPadding = bottomPadding,
@@ -134,6 +140,7 @@ fun DiscRipRoot(container: AppContainer) {
                     onBack = { navController.popIfResumed(entry) },
                     onOpenMetadata = { label -> navController.navigate(MetadataRoute(volumeLabel = label)) },
                     onOpenStorageSettings = { navController.navigate(StorageSettingsRoute) },
+                    onOpenNasSettings = { navController.navigate(NasSettingsRoute) },
                     // The rip screen takes the source screen's place, so Back from it leads Home.
                     onRipStarted = { navController.navigate(RipRoute) { popUpTo(HomeRoute) } },
                 )
@@ -173,9 +180,10 @@ fun DiscRipRoot(container: AppContainer) {
 private fun TabRoot(navController: NavHostController, selected: Int, content: @Composable (bottomPadding: Dp) -> Unit) {
     val items = listOf(
         TabItem(stringResource(R.string.tab_rip), HigIcons.Disc),
+        TabItem(stringResource(R.string.tab_history), HigIcons.Clock),
         TabItem(stringResource(R.string.tab_settings), HigIcons.Gear),
     )
-    val routes = listOf<Any>(HomeRoute, SettingsRoute)
+    val routes = listOf<Any>(HomeRoute, HistoryRoute, SettingsRoute)
     Box(Modifier.fillMaxSize()) {
         content(HigMetrics.tabBarHeight)
         HigTabBar(

@@ -88,4 +88,11 @@ class PlexNamingTest {
     fun `unusable title is rejected`() {
         assertThrows<IllegalArgumentException> { PlexNaming.baseName(matrix.copy(title = "???")) }
     }
+
+    @Test
+    fun `a relative path reads back into the same parts`() {
+        val path = PlexNaming.plan(matrix, "Films/Sci-fi")
+        assertEquals(path, RipPath.of(path.relativeFile))
+        assertEquals(RipPath(emptyList(), "X", "X.mkv"), RipPath.of("X/X.mkv"))
+    }
 }

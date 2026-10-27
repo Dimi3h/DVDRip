@@ -23,6 +23,7 @@ import be.discrip.core.dvd.MainFeature
 import be.discrip.core.dvd.RipPlanning
 import be.discrip.core.format.Formats
 import be.discrip.core.model.QualityPreset
+import be.discrip.core.model.StorageTarget
 import be.discrip.rip.DvdSource
 import be.discrip.rip.RipJob
 import be.discrip.rip.SourceProblem
@@ -41,11 +42,14 @@ import be.discrip.ui.components.NavigationRow
 import be.discrip.ui.components.RowFrame
 import be.discrip.ui.components.ValueRow
 import be.discrip.ui.components.rememberHaptics
+import be.discrip.ui.descriptionRes
+import be.discrip.ui.labelRes
 import be.discrip.ui.rip.audioFormat
 import be.discrip.ui.rip.audioTitle
 import be.discrip.ui.rip.subtitleKind
 import be.discrip.ui.rip.subtitleTitle
 import be.discrip.ui.settings.FolderAccess
+import be.discrip.ui.settings.nasProblemText
 import be.discrip.ui.settings.currentLocale
 import be.discrip.ui.shortLabelRes
 import be.discrip.ui.theme.HigTheme
@@ -60,6 +64,7 @@ fun SourceScreen(
     onBack: () -> Unit,
     onOpenMetadata: (volumeLabel: String?) -> Unit,
     onOpenStorageSettings: () -> Unit,
+    onOpenNasSettings: () -> Unit,
     onRipStarted: () -> Unit,
 ) {
     val viewModel = viewModel { SourceViewModel(container, source) }
@@ -67,7 +72,9 @@ fun SourceScreen(
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     var replace by remember { mutableStateOf<RipJob?>(null) }
+    var nasTrouble by remember { mutableStateOf<StartCheck?>(null) }
     var choosingDefault by remember { mutableStateOf(false) }
+    var choosingStorage by remember { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
         viewModel.refreshFolder()
@@ -81,7 +88,12 @@ fun SourceScreen(
             when (val check = viewModel.prepareStart()) {
                 StartCheck.NeedsMetadata -> onOpenMetadata(ready?.name)
                 StartCheck.NeedsFolder -> onOpenStorageSettings()
+                StartCheck.NeedsNas -> onOpenNasSettings()
                 StartCheck.NotEnoughSpace, StartCheck.Busy -> haptics.failure()
+                is StartCheck.NasUnavailable, is StartCheck.NasFull -> {
+                    haptics.failure()
+                    nasTrouble = check
+                }
                 is StartCheck.Exists -> replace = check.job
                 is StartCheck.Ready -> if (viewModel.start(check.job)) {
                     haptics.success()
@@ -113,7 +125,9 @@ fun SourceScreen(
                 viewModel = viewModel,
                 onOpenMetadata = onOpenMetadata,
                 onOpenStorageSettings = onOpenStorageSettings,
+                onOpenNasSettings = onOpenNasSettings,
                 onChooseDefault = { choosingDefault = true },
+                onChooseStorage = { choosingStorage = true },
                 start = start,
             )
         }
@@ -122,11 +136,38 @@ fun SourceScreen(
     if (choosingDefault && current != null) {
         DefaultAudioSheet(current, viewModel, onClose = { choosingDefault = false })
     }
+    if (choosingStorage && current != null) {
+        StorageSheet(current, viewModel, onClose = { choosingStorage = false })
+    }
+
+    nasTrouble?.let { trouble ->
+        val locale = currentLocale()
+        HigAlert(
+            title = stringResource(R.string.source_nas_alert_title),
+            message = when (trouble) {
+                is StartCheck.NasUnavailable -> stringResource(nasProblemText(trouble.problem))
+                is StartCheck.NasFull -> stringResource(
+                    R.string.source_nas_full_message,
+                    Formats.bytes(trouble.neededBytes, locale),
+                    Formats.bytes(trouble.freeBytes, locale),
+                )
+                else -> ""
+            },
+            actions = listOf(
+                AlertAction(stringResource(R.string.action_ok), AlertActionStyle.CANCEL) { nasTrouble = null },
+                AlertAction(stringResource(R.string.source_nas_open_settings)) {
+                    nasTrouble = null
+                    onOpenNasSettings()
+                },
+            ),
+            onDismissRequest = { nasTrouble = null },
+        )
+    }
 
     replace?.let { job ->
         HigAlert(
             title = stringResource(R.string.source_exists_title),
-            message = stringResource(R.string.source_exists_message, job.path.fileName),
+            message = stringResource(R.string.source_exists_message, job.destination.path.fileName),
             actions = listOf(
                 AlertAction(stringResource(R.string.action_cancel), AlertActionStyle.CANCEL) { replace = null },
                 AlertAction(stringResource(R.string.source_replace), AlertActionStyle.DESTRUCTIVE) {
@@ -149,7 +190,9 @@ private fun ReadyContent(
     viewModel: SourceViewModel,
     onOpenMetadata: (String?) -> Unit,
     onOpenStorageSettings: () -> Unit,
+    onOpenNasSettings: () -> Unit,
     onChooseDefault: () -> Unit,
+    onChooseStorage: () -> Unit,
     start: () -> Unit,
 ) {
     val colors = HigTheme.colors
@@ -173,7 +216,7 @@ private fun ReadyContent(
         SubtitlesSection(state, chosen, viewModel)
     }
 
-    OutputSection(state, onOpenStorageSettings)
+    OutputSection(state, onChooseStorage, onOpenStorageSettings, onOpenNasSettings)
 
     GroupedSection(
         footer = if (state.settings.defaultPreset.isLossy) stringResource(R.string.source_quality_lossy_footer) else null,
@@ -185,7 +228,8 @@ private fun ReadyContent(
         text = stringResource(if (metadata == null) R.string.source_choose_metadata else R.string.source_start),
         onClick = start,
         enabled = chosen != null && !state.ripRunning &&
-            (metadata == null || (state.folderAccess == FolderAccess.GRANTED && state.enoughSpace)),
+            (metadata == null || (!state.needsFolder && !state.needsNas && state.enoughSpace)),
+        loading = state.starting,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 32.dp),
     )
     if (state.ripRunning) {
@@ -284,27 +328,49 @@ private fun SubtitlesSection(state: SourceUiState, title: DvdTitle, viewModel: S
 }
 
 @Composable
-private fun OutputSection(state: SourceUiState, onOpenStorageSettings: () -> Unit) {
+private fun OutputSection(
+    state: SourceUiState,
+    onChooseStorage: () -> Unit,
+    onOpenStorageSettings: () -> Unit,
+    onOpenNasSettings: () -> Unit,
+) {
     val colors = HigTheme.colors
     val locale = currentLocale()
-    val path = state.path
+    val destination = state.destination
     val estimated = state.estimatedBytes
+    val folderName = state.settings.local.displayName.orEmpty()
     val footer = when {
-        state.folderAccess == FolderAccess.REVOKED -> stringResource(R.string.source_folder_revoked)
-        state.folderAccess == FolderAccess.NONE -> stringResource(R.string.source_needs_folder)
+        state.needsFolder && state.folderAccess == FolderAccess.REVOKED -> stringResource(R.string.source_folder_revoked)
+        state.needsFolder -> stringResource(R.string.source_needs_folder)
+        state.needsNas -> stringResource(R.string.source_needs_nas)
         !state.enoughSpace -> stringResource(
-            R.string.source_not_enough_space,
+            if (state.storage.usesLocalFolder) R.string.source_not_enough_space else R.string.source_not_enough_app_space,
             Formats.bytes(state.neededBytes ?: 0, locale),
             Formats.bytes(state.freeBytes ?: 0, locale),
         )
-        else -> state.settings.local.displayName?.let { stringResource(R.string.source_output_footer, it) }
+        else -> listOfNotNull(
+            when (state.storage) {
+                StorageTarget.LOCAL -> stringResource(R.string.source_output_footer, folderName)
+                StorageTarget.BOTH -> stringResource(R.string.source_output_footer_both, folderName)
+                StorageTarget.NAS -> stringResource(
+                    if (state.settings.nas.writeDirectly) R.string.source_output_footer_nas_direct else R.string.source_output_footer_nas,
+                )
+            },
+            if (destination?.plex != null) stringResource(R.string.source_output_footer_plex) else null,
+        ).joinToString(" ")
     }
-    val problem = state.folderAccess != FolderAccess.GRANTED || !state.enoughSpace
+    val problem = state.needsFolder || state.needsNas || !state.enoughSpace
     GroupedSection(header = stringResource(R.string.source_output_header), footer = footer, footerColor = if (problem) colors.orange else null) {
-        if (path != null) {
-            row { ValueRow(stringResource(R.string.source_output_folder), path.relativeFolder) }
-            row { ValueRow(stringResource(R.string.source_output_name), path.fileName) }
+        row {
+            NavigationRow(
+                title = stringResource(R.string.source_storage),
+                value = stringResource(state.storage.labelRes()),
+                onClick = onChooseStorage,
+            )
         }
+        destination?.local?.let { local -> row { ValueRow(stringResource(R.string.source_output_folder), local.path.relativeFolder) } }
+        destination?.nas?.let { nas -> row { ValueRow(stringResource(R.string.source_output_nas), "${nas.shareName}/${nas.path.relativeFolder}") } }
+        destination?.let { row { ValueRow(stringResource(R.string.source_output_name), it.path.fileName) } }
         if (estimated != null) {
             row { ValueRow(stringResource(R.string.source_output_size), "≈ " + Formats.bytes(estimated, locale)) }
         }
@@ -317,8 +383,36 @@ private fun OutputSection(state: SourceUiState, onOpenStorageSettings: () -> Uni
                 )
             }
         }
-        if (state.folderAccess != FolderAccess.GRANTED) {
+        if (state.needsFolder) {
             row { NavigationRow(stringResource(R.string.action_open_settings), onClick = onOpenStorageSettings) }
+        } else if (state.needsNas) {
+            row { NavigationRow(stringResource(R.string.source_nas_open_settings), onClick = onOpenNasSettings) }
+        }
+    }
+}
+
+@Composable
+private fun StorageSheet(state: SourceUiState, viewModel: SourceViewModel, onClose: () -> Unit) {
+    HigSheet(
+        title = stringResource(R.string.source_storage),
+        onDismissRequest = onClose,
+        doneLabel = stringResource(R.string.action_done),
+        onDone = onClose,
+    ) {
+        GroupedSection(footer = stringResource(R.string.source_storage_footer)) {
+            for (target in StorageTarget.entries) {
+                row {
+                    CheckRow(
+                        title = stringResource(target.labelRes()),
+                        subtitle = stringResource(target.descriptionRes()),
+                        checked = state.storage == target,
+                        onClick = {
+                            viewModel.setStorage(target)
+                            onClose()
+                        },
+                    )
+                }
+            }
         }
     }
 }

@@ -4,6 +4,11 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import be.discrip.AppContainer
+import be.discrip.core.naming.FileNameSanitizer
+import be.discrip.core.nas.Nas
+import be.discrip.core.nas.NasException
+import be.discrip.core.nas.NasProblem
+import be.discrip.core.nas.NasTarget
 import be.discrip.core.plex.PlexException
 import be.discrip.core.plex.PlexSection
 import be.discrip.core.settings.AppSettings
@@ -35,6 +40,14 @@ sealed interface SectionsState {
     data class Failed(val reason: CheckFailure) : SectionsState
 }
 
+/** Outcome of the NAS test: connected and allowed to write, or why not. */
+sealed interface NasCheck {
+    data object Idle : NasCheck
+    data object Running : NasCheck
+    data class Connected(val freeBytes: Long) : NasCheck
+    data class Failed(val problem: NasProblem) : NasCheck
+}
+
 /** Local folder state as the Storage screen shows it. */
 enum class FolderAccess { NONE, GRANTED, REVOKED }
 
@@ -58,6 +71,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val folderAccessState = MutableStateFlow(FolderAccess.NONE)
     val folderAccess: StateFlow<FolderAccess> = folderAccessState.asStateFlow()
 
+    private val nasCheckState = MutableStateFlow<NasCheck>(NasCheck.Idle)
+    val nasCheck: StateFlow<NasCheck> = nasCheckState.asStateFlow()
+
     init {
         viewModelScope.launch { container.secretStore.load() }
         refreshFolderAccess()
@@ -65,11 +81,32 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun update(transform: (AppSettings) -> AppSettings) {
         viewModelScope.launch { container.settingsRepository.update(transform) }
+        if (nasCheckState.value !is NasCheck.Running) nasCheckState.value = NasCheck.Idle
     }
 
     fun updateSecrets(transform: (Secrets) -> Secrets) {
         viewModelScope.launch { container.secretStore.update(transform) }
         if (tmdbCheckState.value !is CheckState.Running) tmdbCheckState.value = CheckState.Idle
+        if (nasCheckState.value !is NasCheck.Running) nasCheckState.value = NasCheck.Idle
+    }
+
+    /** Connects to the NAS, signs in, and writes and removes a small file in the films folder. */
+    fun testNas() {
+        viewModelScope.launch {
+            nasCheckState.value = NasCheck.Running
+            val nas = container.settingsRepository.current().nas
+            val password = container.secretStore.load().nasPassword
+            nasCheckState.value = try {
+                withContext(Dispatchers.IO) {
+                    Nas.connect(NasTarget.of(nas.host, nas.share, nas.username, password, nas.domain)).use { share ->
+                        share.checkWritable(FileNameSanitizer.sanitizeRelativePath(nas.filmsFolder))
+                        NasCheck.Connected(share.freeBytes())
+                    }
+                }
+            } catch (e: NasException) {
+                NasCheck.Failed(e.problem)
+            }
+        }
     }
 
     fun testTmdbKey() {
