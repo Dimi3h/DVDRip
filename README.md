@@ -276,6 +276,14 @@ keyPassword=...
 Without it, release builds are signed with the debug key, which is fine for sideloading on your own
 phone.
 
+The tests run the debug build, which R8 leaves alone, so two checks guard the release build. The
+native code finds its Kotlin callbacks (rip progress, block reads from the drive, file writes) by
+name, and nothing in Kotlin calls them, so R8 would drop them; `app/proguard-rules.pro` keeps the
+callback types whole, and `python3 scripts/check_jni_keep.py app/build/outputs/apk/release/app-release.apk
+app/src/main/cpp` checks the APK, read with the SDK's `dexdump`, for every method the C code looks
+up. `scripts/release-smoke-test.sh app/build/outputs/apk/release/app-release.apk` installs and starts
+the release build on a connected emulator or phone and checks that it stays up.
+
 The wrapper pins the Gradle distribution by its SHA-256 (`distributionSha256Sum`), taken from
 services.gradle.org and checked against the downloaded zip.
 
@@ -286,11 +294,12 @@ app/build/outputs/apk/debug/app-debug.apk` checks the ELF segments and their pla
 **CI.** `.github/workflows/ci.yml` runs on every push, on Ubuntu 24.04 runners (pinned so the
 preinstalled NDK and CMake match): core tests, and the NAS client against a Samba server on the
 runner; the rip engine tests on the runner (`native/scripts/test-engine.sh`); app unit tests, the
-debug and release APKs (the debug one is uploaded as the `discrip-debug-apk` artifact), lint and
-the 16 KB alignment check; instrumented tests on an API 30 x86_64 emulator, whose ARM translation
-runs the arm64-only app, including the end-to-end rips of the test DVD to a local folder (lossless
-and "Gebalanceerd", whose file ffprobe then checks: `scripts/check_lossy_output.py`) and to the
-runner's Samba server; and a report of which pinned dependencies have newer stable releases
+debug and release APKs (the debug one is uploaded as the `discrip-debug-apk` artifact), lint, the
+16 KB alignment check and the callbacks in the release build; instrumented tests on an API 30
+x86_64 emulator, whose ARM translation runs the arm64-only app, including the end-to-end rips of
+the test DVD to a local folder (lossless and "Gebalanceerd", whose file ffprobe then checks:
+`scripts/check_lossy_output.py`) and to the runner's Samba server, and then a start of the release
+build; and a report of which pinned dependencies have newer stable releases
 (`python3 scripts/dependency_report.py` does the same locally). The third-party sources and the
 FFmpeg builds are cached between runs. The emulator needs 7.4 GB free next to the build, so the
 job first removes toolchains it does not use (.NET, GHC, CodeQL, Swift).
@@ -356,7 +365,8 @@ native/scripts/           fetch-sources.sh (pinned, checksummed sources), build-
                           make-test-dvd.sh, test-engine.sh
 native/tests/             test_engine.py: engine tests against the authored test DVD
 scripts/                  dependency_report.py, check_native_alignment.py, test_summary.py,
-                          samba-test-server.sh, check_lossy_output.py
+                          samba-test-server.sh, check_lossy_output.py, check_jni_keep.py,
+                          release-smoke-test.sh
 ```
 
 ## Decisions

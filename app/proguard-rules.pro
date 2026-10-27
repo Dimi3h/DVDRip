@@ -12,25 +12,13 @@
 -dontwarn com.google.errorprone.annotations.Immutable
 -dontwarn com.google.errorprone.annotations.RestrictedApi
 
-# Called by name from native code (app/src/main/cpp/jni/rip_jni.c).
--keep class be.discrip.rip.NativeFolder {
-    long stat(byte[]);
-    byte[][] list(byte[]);
-    int open(byte[]);
-}
--keep interface be.discrip.rip.NativeProgress {
-    void onProgress(long, long, long, long);
-}
--keep interface be.discrip.rip.NativeFile {
-    int write(byte[], int, long);
-    int read(byte[], int, long);
-    long size();
-}
--keep class * implements be.discrip.rip.NativeFile {
-    int write(byte[], int, long);
-    int read(byte[], int, long);
-    long size();
-}
+# The callbacks native code finds by name (GetMethodID in app/src/main/cpp/jni/rip_jni.c). Nothing
+# in Kotlin calls them, so R8 would drop them; kept whole, so a changed signature needs no change
+# here. scripts/check_jni_keep.py checks the release APK for every method the C code looks up.
+-keep interface be.discrip.rip.NativeBlocks { <methods>; }
+-keep interface be.discrip.rip.NativeFile { <methods>; }
+-keep interface be.discrip.rip.NativeProgress { <methods>; }
+-keep class be.discrip.rip.NativeFolder { <methods>; }
 
 # smbj (the NAS client) reports connection events through mbassador, which finds the receiving
 # methods by their @Handler annotation and calls them, and creates its own handler invocations,

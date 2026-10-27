@@ -94,6 +94,9 @@ jobs:
         run: cat app/build/reports/lint-results-debug.txt 2>/dev/null || echo "No lint report was written."
       - name: Check 16 KB page alignment of native libraries
         run: python3 scripts/check_native_alignment.py app/build/outputs/apk/debug/app-debug.apk
+      # The native code finds its Kotlin callbacks by name; R8 must not drop or rename them.
+      - name: Check that the release build keeps the callbacks of the native code
+        run: python3 scripts/check_jni_keep.py app/build/outputs/apk/release/app-release.apk app/src/main/cpp
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
@@ -140,8 +143,8 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Build the app and its instrumented tests
-        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Build the app, its instrumented tests and the release build
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease
       # The emulator wants 1.2 times its 6 GB data partition free (7.4 GB), about what the runner
       # has left after the native build; smaller partitions (the action's disk-size input, the
       # emulator's -partition-size) did not take effect. Toolchains this job never uses free 14 GB.
@@ -166,6 +169,7 @@ jobs:
             -Pandroid.testInstrumentationRunnerArguments.smbReadOnlyShare=$DISCRIP_SMB_READONLY_SHARE
             -Pandroid.testInstrumentationRunnerArguments.smbUser=$DISCRIP_SMB_USER
             -Pandroid.testInstrumentationRunnerArguments.smbPassword=$DISCRIP_SMB_PASSWORD
+            && scripts/release-smoke-test.sh app/build/outputs/apk/release/app-release.apk
       # Skipped tests fail the job: here every test, the NAS ones included, must run.
       - name: Instrumented test results
         if: always()
