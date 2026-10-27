@@ -161,7 +161,7 @@ app/                      Android app
   ui/theme, ui/components HIG theme and components
   ui/home, ui/metadata, ui/settings, ui/navigation
 native/scripts/           fetch-sources.sh: pinned, checksummed third-party sources
-scripts/                  dependency_report.py, check_native_alignment.py
+scripts/                  dependency_report.py, check_native_alignment.py, test_summary.py
 ```
 
 ## Decisions

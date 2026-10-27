@@ -98,12 +98,17 @@ jobs:
           arch: x86_64
           disable-animations: true
           script: ./gradlew :app:connectedDebugAndroidTest
+      - name: Instrumented test results
+        if: always()
+        run: python3 scripts/test_summary.py app/build/outputs/androidTest-results/connected
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: instrumented-test-reports
-          path: app/build/reports/androidTests/
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
 
   dependencies:
     name: Dependency report
