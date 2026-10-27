@@ -49,7 +49,7 @@ tasks.test {
 
 // The NAS client against a real Samba server, which scripts/samba-test-server.sh starts; the
 // tests fail when its DISCRIP_SMB_* environment is missing.
-val smbTest by tasks.registering(Test::class) {
+tasks.register<Test>("smbTest") {
     description = "Tests the NAS client against the Samba server in the DISCRIP_SMB_* environment."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs

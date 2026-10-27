@@ -107,7 +107,7 @@ kotlin {
 
 // The native build compiles third-party sources that are not in git. The script fetches them,
 // pinned by version and SHA-256, and returns at once when they are already in place.
-val fetchNativeSources by tasks.registering(Exec::class) {
+val fetchNativeSources = tasks.register<Exec>("fetchNativeSources") {
     description = "Downloads the pinned third-party sources of the native build."
     val script = rootProject.file("native/scripts/fetch-sources.sh")
     inputs.file(script)
@@ -116,7 +116,7 @@ val fetchNativeSources by tasks.registering(Exec::class) {
 
 // FFmpeg is configured and built by its own script with the NDK the app uses (CMake then links
 // the result). The script keeps a fingerprint and returns at once when nothing changed.
-val buildFfmpeg by tasks.registering(Exec::class) {
+val buildFfmpeg = tasks.register<Exec>("buildFfmpeg") {
     description = "Builds FFmpeg for arm64-v8a from the pinned sources."
     dependsOn(fetchNativeSources)
     val script = rootProject.file("native/scripts/build-ffmpeg.sh")
@@ -155,7 +155,7 @@ abstract class GenerateTestDvd : DefaultTask() {
     }
 }
 
-val generateTestDvd by tasks.registering(GenerateTestDvd::class) {
+val generateTestDvd = tasks.register<GenerateTestDvd>("generateTestDvd") {
     description = "Authors the test DVD for the instrumented rip tests."
     script = rootProject.layout.projectDirectory.file("native/scripts/make-test-dvd.sh")
     outputDir = layout.buildDirectory.dir("generated/testDvd")
