@@ -13,13 +13,17 @@ import be.discrip.data.SettingsRepository
 import be.discrip.drive.DriveManager
 import be.discrip.rip.RipLabels
 import be.discrip.rip.RipManager
+import be.discrip.rip.RipState
 import be.discrip.rip.cleanStaging
+import be.discrip.work.RipService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
@@ -75,6 +79,13 @@ class AppContainer(context: Context) {
 
     init {
         applicationScope.launch(Dispatchers.IO) { cleanStaging(stagingDir, history.load(), startedAt) }
+        // The rip service keeps the app going while a rip or an upload runs, and stops by itself.
+        // Rips and uploads start from the screen, so the app is in the foreground to start it.
+        applicationScope.launch {
+            combine(rips.rip, rips.retry) { rip, retry -> rip is RipState.Running || retry != null }
+                .distinctUntilChanged()
+                .collect { busy -> if (busy) RipService.start(appContext) }
+        }
     }
 }
 

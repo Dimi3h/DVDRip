@@ -18,7 +18,7 @@ The app is built in phases; every phase ends with a buildable app and passing te
 | 3 | Native build (libdvdread, libdvdcss, FFmpeg), JNI bridge, ISO to MKV end to end with the lossless preset | done |
 | 4 | Main-feature detection, audio and subtitle selection, chapters, tags, size estimates, free-space check | done |
 | 5 | SMB upload, Plex refresh and verification, "Beide" mode, history | done |
-| 6 | Real USB drive, foreground service, eject, batch flow | planned |
+| 6 | Real USB drive, foreground service, eject, batch flow | done |
 | 7 | Lossy presets: MediaCodec encoders, yadif, aspect ratio, H.264 fallback, LPCM to FLAC | planned |
 
 ### What phase 1 contains
@@ -150,6 +150,32 @@ authentication, comes in phase 6 (see "CSS on real drives" below).
   mapping and scan check, and the history as JSON. Tested against a real Samba server, in `core`
   and on the emulator, with a MockWebServer playing Plex.
 
+### What phase 6 contains
+
+- **The USB drive as a source**: Home's drive section has "Rippen" for a DVD-Video disc, which
+  opens its titles like an image; the rip reads the disc over USB. The disc is named by its volume
+  label, and the metadata screen searches TMDB with it.
+- **CSS on the drive**: a CSS-protected disc is authenticated with the drive when it opens (the
+  drive then hands out its scrambled sectors), so a drive whose region does not match is reported
+  before the rip, with the advice to set it to the disc's region (2 for European discs) on a PC.
+  The engine recovers the title keys from the sectors with libdvdcss and decrypts them.
+- **Reading a real drive**: one attempt per read, since the engine retries every block range three
+  times and skips what stays unreadable; a drive that lost its authentication (a bus reset) is
+  authenticated again, and after a unit attention the disc is compared with the one being read.
+  The tray is locked while the drive is read.
+- **Errors that end a rip**: the drive unplugged or no longer answering, the disc taken out or
+  swapped, a region the drive refuses, a drive that keeps refusing the protected sectors, and a
+  title whose key cannot be found. Each is named on the rip screen and in Geschiedenis, and the
+  unfinished file is deleted.
+- **Batches**: after a good rip the disc comes out and the rip screen says "Steek de volgende disc
+  in"; once the drive has read the next one, "Volgende disc rippen" opens it. It can go in while
+  the last file is still being uploaded; the next rip starts when the upload is done. The film
+  details of the last rip are cleared, so the next disc starts from its own label.
+- **Foreground service**: a rip or an upload goes on with the screen off or the app in the
+  background. A notification shows the film, the stage and the progress, with "Stoppen", and
+  tells how the rip ended. The app asks for permission to show notifications at the first rip
+  (Android 13 and later); without it the work runs all the same.
+
 ## Building
 
 Requirements:
@@ -277,20 +303,25 @@ core/                     Platform-independent Kotlin (separate Gradle build, Ma
   settings/               AppSettings (everything except secrets)
   usb/                    Bulk-Only Transport: CBW/CSW, reset recovery, the BulkTransport interface
   scsi/                   SCSI/MMC command builders, response parsers, OpticalDrive
-  disc/                   Block devices (drive, ISO file), ISO 9660/UDF reader, disc probe, monitor
+  css/                    CSS authentication with the drive and its cipher (CryptKey)
+  disc/                   Block devices (drive, ISO file), ISO 9660/UDF reader, disc probe,
+                          monitor, DriveReader (how the rip engine reads a drive)
   dvd/                    Title list and rip report models, ISO 639 codes, track order, progress
-  src/test/.../testing/   Simulated USB drive and disc images for the tests
-  src/test/resources/images/  Disc image fixtures and the script that makes them
+  src/testFixtures/.../testing/  Simulated USB drive and CSS scrambler, also for the app's tests
+  src/test/.../testing/   Disc images for the tests
+  src/test/resources/     Disc image fixtures (and the script that makes them), CSS vectors
 app/                      Android app
   data/                   DataStore settings, encrypted secrets, local folder grants, history file
   usb/                    libusb and Java USB transports, mass-storage interface lookup
-  drive/                  DriveManager: discovery, permission, claim, polling
+  drive/                  DriveManager: discovery, permission, claim, polling, lending the disc
   rip/                    RipManager (rip, upload, Plex), DVD sessions over JNI, SAF folder
                           reader, outputs (local folder, app storage, NAS), destinations
+  work/                   The foreground service and its notifications
   src/main/cpp/           CMake build of libusb, libdvdcss, libdvdread and the engine
     engine/               The rip engine in C: sources, title plans, VOBU reader, remux to MKV
     jni/, usb_jni.c       JNI bridges for the engine and for libusb
-    host/                 discrip_host, the engine's command-line driver for the build machine
+    host/                 discrip_host, the engine's command-line driver for the build machine,
+                          and css_tool (CSS test vectors and scrambled copies from libdvdcss)
     config/               Hand-written config.h for libdvdcss and libdvdread
   ui/theme, ui/components HIG theme and components
   ui/home, ui/metadata, ui/settings, ui/source, ui/rip, ui/history, ui/navigation
@@ -402,9 +433,15 @@ These were made without asking because they do not change the architecture; each
     `libdiscrip.so`, so that library, and with it the app, falls under the GPL. That is fine for a
     personal app that is not distributed; anyone who passes the APK on must offer this source
     code. FFmpeg (LGPL-2.1-or-later) and libusb (LGPL-2.1-or-later) stay separate shared libraries.
-21. **No foreground service yet.** Until phase 6 the rip runs while DiscRip is open: the rip screen
-    keeps the display (and with it the CPU) awake. Leaving the app during a rip can get it paused
-    or stopped by Android.
+21. **A foreground service follows the work.** The rip and the upload run in `RipManager`; the
+    service (`work/RipService`) starts when either starts, holds a partial wake lock, shows and
+    updates the notification and stops when nothing runs. Its type is `connectedDevice` while the
+    USB drive is read (the USB permission DiscRip holds is its prerequisite, and it has no time
+    limit) and `dataSync` otherwise, which Android 15 limits to six hours a day in the background;
+    should that run out, the work goes on without the service. A Wi-Fi lock is held while files go
+    to the NAS or Plex is asked; on Android 14 and later Android turns it into a low-latency lock
+    that only works with the screen on, so with the screen off Wi-Fi may save power and transfer
+    more slowly, but stays connected. The rip screen no longer keeps the display on.
 22. **Main feature by cell order.** Players reach the film through the disc's menus, which would
     need a DVD virtual machine (libdvdnav) to follow. The cell lists say enough instead: decoy
     titles reuse the film's cells in shuffled or repeated order, or point cells at more data than
@@ -455,18 +492,70 @@ These were made without asking because they do not change the architecture; each
     (`scripts/samba-test-server.sh`), in `core` and from the emulator, which reaches the runner as
     10.0.2.2; a MockWebServer on the device plays Plex. The instrumented test summary fails on
     skipped tests, so the NAS tests cannot drop out unnoticed.
+34. **CSS** is handled as described in "CSS on real drives" below: authentication in Kotlin, the
+    engine decrypting with its own libdvdcss instance, no key cache.
+35. **One read attempt from the drive.** The engine already retries every block range three times
+    and skips what stays unreadable; retries in the drive layer as well would multiply, and on a
+    scratched disc every failed read can cost the drive seconds. Conditions that cannot improve end
+    the rip at once instead of marking every following block unreadable: the drive gone (a USB
+    error, or no answer to TEST UNIT READY after a failed transfer), no disc, a region refusal, and
+    protected sectors refused right after a new authentication. After a unit attention the disc's
+    size and primary volume descriptor are compared with the disc being read: the same disc reads
+    on (re-authenticated if needed), another one ends the rip.
+36. **The disc is lent to the engine.** While the source screen or a rip has the disc, the drive
+    monitor does not poll: its TEST UNIT READY would take the unit attention of a disc change that
+    the rip has to see. Reads hop onto the drive's own thread, where every command to the drive
+    runs. When the loan ends the drive is read afresh if the reads saw a disc change or reset.
+    Each probe of a disc gets a new number, so a disc put in again, even the same one, is a new
+    source.
+37. **Locked tray, eject after success.** The tray is locked (PREVENT MEDIUM REMOVAL) while the
+    drive is read, so a press on the drive's button cannot end a rip, and unlocked after; a tray an
+    earlier run left locked is unlocked when the drive connects. After a good rip the disc comes
+    out at once, before the upload, so the next one can go in; after a failed rip it stays in.
+38. **The film details go with the rip.** After a good rip the draft (title, year, TMDB id) is
+    cleared, so a batch cannot give the next disc the last film's name.
+39. **Notification permission at the first rip.** Android 13 and later ask for it when "Rip
+    starten" is first tapped, when the reason is clear; the rip starts whatever the answer.
+40. **Drive tests without a drive.** core's simulated drive (Bulk-Only Transport, SCSI, CSS
+    authentication, region, faults) is a test fixture that the instrumented tests use too.
 
 ## CSS on real drives (phase 6)
 
-Phase 3 rips images and VIDEO_TS folders. libdvdcss handles CSS in them as specified
-(`DVDCSS_METHOD=title`, keys cached in the app's cache directory): it recovers title keys from
-the scrambled sectors themselves. Current drives (RPC-II), however, refuse to hand out
-CSS-scrambled sectors until the host has gone through CSS authentication (sense 05/6F/03, "read of
-scrambled sector without authentication"). libdvdcss's stream API, which DiscRip uses because apps
-cannot open `/dev/sr0`, cannot send SCSI commands itself. Phase 6, which makes the USB drive a rip
-source, therefore adds the authentication handshake (REPORT KEY and SEND KEY: AGID, challenges,
-bus key) to the Kotlin SCSI layer, run before the engine reads, while libdvdcss still recovers the
-title keys. The overall design stays as specified.
+libdvdcss recovers title keys from the scrambled sectors themselves (`DVDCSS_METHOD=title`), as
+specified; that works the same for images and drives. Current drives (RPC-II), however, refuse to
+hand out CSS-scrambled sectors until the host has gone through CSS authentication (sense 05/6F/03,
+"read of scrambled sector without authentication"), and libdvdcss's stream API, which DiscRip
+uses because apps cannot open `/dev/sr0`, cannot send SCSI commands. The authentication therefore
+runs in the Kotlin SCSI layer (`core/css`): REPORT KEY and SEND KEY for the grant ID, both
+challenges and keys, then the disc key read, after which the drive sets its authentication success
+flag (a flag left clear means a region the drive refuses). Its cipher, libdvdcss's CryptKey, is
+ported to Kotlin and checked against 288 results of libdvdcss's own code (`css_tool vectors`, also
+compared in CI). The drive's title keys are not used: decrypting them would need the player keys
+and the disc key cracking of libdvdcss's other methods, while the title method needs neither.
+
+Three things differ from the original plan, all because of how libdvdcss and libdvdread behave:
+
+- **The engine decrypts title VOBs itself**, through its own libdvdcss instance, instead of letting
+  libdvdread do it. When libdvdcss finds no key for a title set, libdvdread ignores the error and
+  reads on with the previous title set's key, or with one never set (libdvdcss does not clear it):
+  the rip would be garbage that nothing notices. The engine recovers the key at the first scrambled
+  block it reads, only for the title set being ripped, checks that it got one, and otherwise stops
+  the title with a message that its key could not be found, as specified. A block that cannot be read during the
+  search does not end it: the search starts again past it. The search reads block by block, on a
+  disc without a usable key through the whole title, and can be stopped.
+- **libdvdcss's key cache is off** (`DVDCSS_CACHE=off`, not the app's cache directory). Without the
+  disc key, which the stream API never sees, libdvdcss names a disc's cache after its volume label
+  and date alone. Discs of a box set can share those, and a decrypted copy shares them with its
+  original; a key cached for the wrong disc decrypts to garbage, and a cached "unencrypted" makes
+  the original fail. Recovering the key of one title set takes a second or two.
+- **libdvdread no longer cracks every key** at the first VOB it opens (`DVDREAD_NOKEYS`); the engine
+  only needs the title set it rips.
+
+The engine tests rip copies of the test DVD scrambled with libdvdcss's own cipher (`css_tool
+scramble`): the output equals the clear rip, also when scrambling starts mid-title; a title whose
+key cannot be found is refused; unreadable blocks in the search are skipped. On the emulator, a
+simulated drive (BOT, SCSI, CSS gating, region) serves a CSS copy scrambled by a Kotlin port of the
+cipher, checked byte for byte against libdvdcss.
 
 ## Hardware checklist
 
@@ -498,7 +587,7 @@ Phase 3 on a phone (no drive needed):
 2. Copy an unencrypted DVD image to the phone (the test DVD, or an ISO of one of your own discs)
    and tap "ISO-bestand" on Home. The titles appear with the longest one marked "Hoofdfilm".
 3. Tap "Metadata kiezen", pick the film, then "Rip starten". Watch percentage, speed and time left;
-   the screen stays on.
+   from phase 6 on the screen may go off and the notification shows the progress.
 4. Open the MKV from `Films/<Title> (<Year>) {tmdb-<id>}/` in VLC or Plex: chapters, Dutch audio
    first and marked default, the right display aspect ratio.
 5. Rip the same disc again: DiscRip asks before replacing the file. Cancel a rip halfway: no file
@@ -539,6 +628,27 @@ Phase 5 with a Synology and Plex:
    on again and tap "Opnieuw uploaden".
 7. Change the Plex token to a wrong one: the rip still succeeds and the result says Plex refuses
    the token.
+
+Phase 6 with the drive:
+
+1. Insert an unprotected disc (a home-made DVD, or the test DVD burnt to a DVD±R) and tap
+   "Rippen" under "Station": the titles appear. Rip it: during the rip the drive's eject button
+   does nothing; afterwards the disc comes out and the rip screen says "Steek de volgende disc in".
+2. Insert a commercial CSS-protected disc with the drive set to region 2: the titles appear after
+   a moment (authentication). Rip the main feature and check it in VLC: no green blocks or
+   garbage, sound in sync. The log (`adb logcat -s DiscRip`) shows "CSS title key found".
+3. Batch: while the rip screen says "Steek de volgende disc in", put the next disc in; "Volgende
+   disc rippen" appears once the drive has read it. With a NAS rip, do this during the upload.
+4. Turn the screen off during a rip and leave the phone for ten minutes: the rip goes on; the
+   notification shows progress and "Stoppen", and says how the rip ended.
+5. Pull the USB cable during a rip: "Het station werd losgekoppeld of reageert niet meer", no file
+   left behind, and Geschiedenis lists it with that reason.
+6. Open the tray with the paper-clip hole during a rip (the button is locked): "De disc werd uit
+   het station gehaald of vervangen".
+7. A disc of another region (or a drive whose region was never set): the source screen says the
+   drive refuses the disc and how to set the region on a PC.
+8. A scratched disc: the rip goes on past unreadable sectors and the result lists them; on a disc
+   where the CSS key search runs into a scratch, the search starts again past it.
 
 ## Privacy
 

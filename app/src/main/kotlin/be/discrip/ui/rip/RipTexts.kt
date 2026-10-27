@@ -102,24 +102,24 @@ fun ripStatusLine(state: RipState): String = when (state) {
 }
 
 @Composable
-fun failureText(reason: RipFailure): String = stringResource(
-    when (reason) {
-        RipFailure.CANCELLED -> R.string.rip_failure_cancelled
-        RipFailure.NO_TITLE -> R.string.rip_failure_no_title
-        RipFailure.UNREADABLE -> R.string.rip_failure_unreadable
-        RipFailure.SCRAMBLED -> R.string.rip_failure_scrambled
-        RipFailure.NO_VIDEO -> R.string.rip_failure_no_video
-        RipFailure.NO_SPACE -> R.string.rip_failure_no_space
-        RipFailure.WRITE_FAILED -> R.string.rip_failure_write_failed
-        RipFailure.OUTPUT_UNAVAILABLE -> R.string.rip_failure_output_unavailable
-        RipFailure.VERIFY_FAILED -> R.string.rip_failure_verify_failed
-        RipFailure.DRIVE_DISCONNECTED -> R.string.rip_failure_drive_disconnected
-        RipFailure.DISC_CHANGED -> R.string.rip_failure_disc_changed
-        RipFailure.REGION_MISMATCH -> R.string.rip_failure_region
-        RipFailure.CSS_REFUSED -> R.string.rip_failure_css_refused
-        RipFailure.FAILED -> R.string.rip_failure_failed
-    },
-)
+fun failureText(reason: RipFailure): String = stringResource(failureTextRes(reason))
+
+fun failureTextRes(reason: RipFailure): Int = when (reason) {
+    RipFailure.CANCELLED -> R.string.rip_failure_cancelled
+    RipFailure.NO_TITLE -> R.string.rip_failure_no_title
+    RipFailure.UNREADABLE -> R.string.rip_failure_unreadable
+    RipFailure.SCRAMBLED -> R.string.rip_failure_scrambled
+    RipFailure.NO_VIDEO -> R.string.rip_failure_no_video
+    RipFailure.NO_SPACE -> R.string.rip_failure_no_space
+    RipFailure.WRITE_FAILED -> R.string.rip_failure_write_failed
+    RipFailure.OUTPUT_UNAVAILABLE -> R.string.rip_failure_output_unavailable
+    RipFailure.VERIFY_FAILED -> R.string.rip_failure_verify_failed
+    RipFailure.DRIVE_DISCONNECTED -> R.string.rip_failure_drive_disconnected
+    RipFailure.DISC_CHANGED -> R.string.rip_failure_disc_changed
+    RipFailure.REGION_MISMATCH -> R.string.rip_failure_region
+    RipFailure.CSS_REFUSED -> R.string.rip_failure_css_refused
+    RipFailure.FAILED -> R.string.rip_failure_failed
+}
 
 /** What the user reads when telling Plex about a rip did not work out. */
 fun plexResultText(result: PlexResult): Int = when (result) {

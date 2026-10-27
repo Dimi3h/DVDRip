@@ -329,6 +329,14 @@
     <string name="rip_next_disc_take_out">Take the disc out of the drive and insert the next one</string>
     <string name="rip_next_disc_open">Rip the next disc</string>
     <string name="rip_next_disc_footer">The disc is done and came out of the drive. The next one can go in, also while the file is still being uploaded.</string>
+    <string name="notification_channel_progress">Rip progress</string>
+    <string name="notification_channel_result">Finished rips</string>
+    <string name="notification_reading">Reading and muxing · %1$s</string>
+    <string name="notification_left">%1$s · %2$s left</string>
+    <string name="notification_retry_title">Upload to the NAS</string>
+    <string name="notification_retry_upload">Uploading again · %1$s</string>
+    <string name="notification_done">Done: %1$s</string>
+    <string name="notification_failed">Rip failed: %1$s</string>
     <string name="rip_failure_failed">The rip failed.</string>
     <string name="rip_failure_detail">Details: %1$s</string>
     <plurals name="source_chapters">

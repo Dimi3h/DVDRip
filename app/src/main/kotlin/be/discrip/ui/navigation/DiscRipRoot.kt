@@ -11,12 +11,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.core.net.toUri
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavDestination
@@ -29,21 +30,22 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import be.discrip.AppContainer
 import be.discrip.R
+import be.discrip.rip.DvdSource
+import be.discrip.rip.RipState
 import be.discrip.ui.components.HigTabBar
 import be.discrip.ui.components.TabItem
 import be.discrip.ui.history.HistoryScreen
 import be.discrip.ui.home.HomeScreen
 import be.discrip.ui.icons.HigIcons
-import be.discrip.rip.DvdSource
 import be.discrip.ui.metadata.MetadataScreen
 import be.discrip.ui.rip.RipScreen
-import be.discrip.ui.source.SourceScreen
 import be.discrip.ui.settings.MetadataSettingsScreen
 import be.discrip.ui.settings.NasSettingsScreen
 import be.discrip.ui.settings.PlexSettingsScreen
 import be.discrip.ui.settings.QualitySettingsScreen
 import be.discrip.ui.settings.SettingsScreen
 import be.discrip.ui.settings.StorageSettingsScreen
+import be.discrip.ui.source.SourceScreen
 import be.discrip.ui.theme.HigMetrics
 import be.discrip.ui.theme.HigTheme
 
@@ -61,11 +63,19 @@ private fun NavHostController.popIfResumed(entry: NavBackStackEntry) {
     if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) popBackStack()
 }
 
-/** App root: theme, navigation with iOS push transitions, and the tab bar on the tab roots. */
+/**
+ * App root: theme, navigation with iOS push transitions, and the tab bar on the tab roots. Every
+ * new [ripScreenRequests] count (a tapped rip notification) shows the rip screen.
+ */
 @Composable
-fun DiscRipRoot(container: AppContainer) {
+fun DiscRipRoot(container: AppContainer, ripScreenRequests: Int = 0) {
     HigTheme {
         val navController = rememberNavController()
+        LaunchedEffect(ripScreenRequests) {
+            if (ripScreenRequests > 0 && container.rips.rip.value != RipState.Idle) {
+                navController.navigate(RipRoute) { launchSingleTop = true }
+            }
+        }
 
         NavHost(
             navController = navController,

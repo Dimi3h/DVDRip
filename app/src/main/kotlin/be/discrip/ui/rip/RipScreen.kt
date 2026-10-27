@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,22 +14,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import be.discrip.AppContainer
 import be.discrip.R
-import be.discrip.core.dvd.Iso639
-import be.discrip.core.format.Formats
-import be.discrip.core.dvd.RipFailure
-import be.discrip.core.plex.PlexPublication
 import be.discrip.core.disc.DiscState
+import be.discrip.core.dvd.Iso639
+import be.discrip.core.dvd.RipFailure
+import be.discrip.core.format.Formats
+import be.discrip.core.plex.PlexPublication
 import be.discrip.drive.DriveStatus
 import be.discrip.rip.DvdSource
 import be.discrip.rip.NasOutcome
@@ -71,13 +69,8 @@ fun RipScreen(
         if (state == RipState.Idle) onBack()
     }
 
+    // The rip service keeps the work going with the screen off.
     val running = state is RipState.Running
-    // No foreground service yet: keep the screen, and with it the CPU, awake while ripping.
-    val view = LocalView.current
-    DisposableEffect(running) {
-        view.keepScreenOn = running
-        onDispose { view.keepScreenOn = false }
-    }
 
     HigScaffold(title = stringResource(R.string.rip_title), largeTitle = false, backLabel = backLabel, onBack = onBack) {
         when (val rip = state) {

@@ -1,5 +1,10 @@
 package be.discrip.ui.source
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
@@ -10,9 +15,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -49,8 +56,8 @@ import be.discrip.ui.rip.audioTitle
 import be.discrip.ui.rip.subtitleKind
 import be.discrip.ui.rip.subtitleTitle
 import be.discrip.ui.settings.FolderAccess
-import be.discrip.ui.settings.nasProblemText
 import be.discrip.ui.settings.currentLocale
+import be.discrip.ui.settings.nasProblemText
 import be.discrip.ui.shortLabelRes
 import be.discrip.ui.theme.HigTheme
 import kotlinx.coroutines.launch
@@ -83,7 +90,8 @@ fun SourceScreen(
 
     val current = state
     val ready = current?.ready
-    val start: () -> Unit = {
+    val context = LocalContext.current
+    val startChecked: () -> Unit = {
         scope.launch {
             when (val check = viewModel.prepareStart()) {
                 StartCheck.NeedsMetadata -> onOpenMetadata(ready?.name)
@@ -101,6 +109,13 @@ fun SourceScreen(
                 }
             }
         }
+    }
+    // The progress shows in a notification while the rip runs; Android 13 and later ask first.
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { startChecked() }
+    val start: () -> Unit = {
+        val ask = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && current?.metadata != null &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (ask) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) else startChecked()
     }
 
     HigScaffold(

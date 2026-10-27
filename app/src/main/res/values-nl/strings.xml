@@ -327,6 +327,14 @@
     <string name="rip_next_disc_take_out">Haal de disc uit het station en steek de volgende in</string>
     <string name="rip_next_disc_open">Volgende disc rippen</string>
     <string name="rip_next_disc_footer">De disc is klaar en uit het station gekomen. De volgende mag erin, ook terwijl het bestand nog wordt geüpload.</string>
+    <string name="notification_channel_progress">Voortgang van rips</string>
+    <string name="notification_channel_result">Afgeronde rips</string>
+    <string name="notification_reading">Lezen en muxen · %1$s</string>
+    <string name="notification_left">%1$s · nog %2$s</string>
+    <string name="notification_retry_title">Upload naar de NAS</string>
+    <string name="notification_retry_upload">Opnieuw uploaden · %1$s</string>
+    <string name="notification_done">Klaar: %1$s</string>
+    <string name="notification_failed">Rip mislukt: %1$s</string>
     <string name="rip_failure_failed">De rip is mislukt.</string>
     <string name="rip_failure_detail">Details: %1$s</string>
     <plurals name="source_chapters">
