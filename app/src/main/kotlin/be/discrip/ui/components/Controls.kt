@@ -292,3 +292,15 @@ fun ClearButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
 fun SectionContent(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) { content() }
 }
+
+/** UIProgressView (default style): a 4 dp rounded track that fills with the accent color. */
+@Composable
+fun ProgressBar(fraction: Float, modifier: Modifier = Modifier, color: Color = HigTheme.colors.accent) {
+    val colors = HigTheme.colors
+    val shown by animateFloatAsState(fraction.coerceIn(0f, 1f), tween(450), label = "progress")
+    Canvas(modifier.fillMaxWidth().height(4.dp)) {
+        val radius = CornerRadius(size.height / 2, size.height / 2)
+        drawRoundRect(colors.tertiaryFill, cornerRadius = radius)
+        if (shown > 0f) drawRoundRect(color, size = size.copy(width = size.width * shown), cornerRadius = radius)
+    }
+}

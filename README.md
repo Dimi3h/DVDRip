@@ -15,7 +15,7 @@ The app is built in phases; every phase ends with a buildable app and passing te
 |---|---|---|
 | 1 | Project skeleton, HIG theme, Settings (presets, storage, NAS, Plex, TMDB key), TMDB client, manual metadata form | done |
 | 2 | USB layer: enumerate the drive, INQUIRY, detect the disc, read sector 16 and show the volume label; fake block device backed by an ISO | done |
-| 3 | Native build (libdvdread, libdvdcss, FFmpeg), JNI bridge, ISO to MKV end to end with the lossless preset | planned |
+| 3 | Native build (libdvdread, libdvdcss, FFmpeg), JNI bridge, ISO to MKV end to end with the lossless preset | done |
 | 4 | Main-feature detection, audio and subtitle selection, chapters, tags, size estimates, free-space check | planned |
 | 5 | SMB upload, Plex refresh and verification, "Beide" mode, history | planned |
 | 6 | Real USB drive, foreground service, eject, batch flow | planned |
@@ -64,7 +64,36 @@ The app is built in phases; every phase ends with a buildable app and passing te
   (tray, spin-up, unit attentions, stalls, timeouts, bad status wrappers, unplugging, read errors)
   backed by disc images: synthetic ones and real ones made by `genisoimage` and `mkudffs`.
 
-Ripping arrives in phase 3; the app does not pretend otherwise.
+### What phase 3 contains
+
+- **Sources on Home** ("Nieuwe rip"): *ISO-bestand* opens the document picker for a DVD image,
+  *VIDEO_TS-map* the folder picker for a copied DVD (the VIDEO_TS folder itself or the folder above
+  it). Both work on internal storage, SD cards and USB sticks. The image is checked for a VIDEO_TS
+  directory (UDF or ISO 9660) before the engine opens it.
+- **Source screen**: the titles with duration, chapters, audio tracks and camera angles; the
+  longest title is chosen as the main feature (proper scoring comes in phase 4); the metadata for
+  the rip; the audio tracks in output order with their format; where the file goes.
+- **Rip screen**: percentage, read speed in MB/s, time left, bytes written, position in the title
+  and elapsed time; cancel with confirmation. The screen stays on while ripping. The result shows
+  size, duration, chapters and audio languages as read back from the finished file, unreadable
+  sectors and the engine's notes. Home shows the running or last rip.
+- **Lossless MKV**: MPEG-2 video and AC-3, DTS and MPEG audio copied bit-exact; LPCM rewritten as
+  PCM, or as FLAC when "LPCM omzetten naar FLAC" is on. All audio tracks, Dutch and English first,
+  the first main track as default, commentary and audio description named and never default.
+  Languages as ISO 639-2/B codes (`dut`, `eng`, `ger`, …), the film title and year as TITLE and
+  DATE_RELEASED tags, chapters at the program starts named "Hoofdstuk 1", "Hoofdstuk 2", …
+  The display aspect ratio (4:3 or 16:9) is kept. Subtitles follow in phase 4.
+- **Errors**: file or folder cannot be opened, not a DVD-Video, unreadable IFO files, no titles,
+  another rip running, CSS key not recoverable, local folder gone or no longer writable, disk full,
+  write errors, cancelled. Unfinished files are deleted.
+- **Under the hood**: the rip engine in C (`app/src/main/cpp/engine/`), the JNI bridge
+  (`app/src/main/cpp/jni/rip_jni.c`), FFmpeg 9.0.2, libdvdread 7.1.1 and libdvdcss 1.6.0 built
+  from source. The same engine is built for the build machine as `discrip_host`, a command-line
+  driver, and tested there (also under AddressSanitizer and UBSan) against a DVD authored in the
+  test run. On the phone, an instrumented test rips the same DVD through the app's rip manager.
+
+The USB drive from phase 2 is not a rip source yet: ripping from the drive, with CSS
+authentication, comes in phase 6 (see "CSS on real drives" below).
 
 ## Building
 
@@ -76,10 +105,17 @@ Requirements:
   and `local.properties` with `sdk.dir` or the `ANDROID_HOME` environment variable.
 - NDK r30 (`30.0.16248370`) and CMake 4.1.2 from the SDK manager. The Android Gradle plugin
   installs both when they are missing and the SDK licenses are accepted.
-- bash, curl, tar and `sha256sum` or `shasum`: before every build Gradle runs
+- bash, curl, tar, make and `sha256sum` or `shasum`: before every build Gradle runs
   `native/scripts/fetch-sources.sh`, which downloads the third-party sources the native build
-  compiles (now libusb 1.0.30), checks their SHA-256 against the pinned value and unpacks them into
-  `native/third_party/` (git-ignored). Linux and macOS work as they are; on Windows build in WSL.
+  compiles (libusb 1.0.30, libdvdcss 1.6.0, libdvdread 7.1.1, FFmpeg 9.0.2), checks their SHA-256
+  against the pinned value and unpacks them into `native/third_party/` (git-ignored). Then it runs
+  `native/scripts/build-ffmpeg.sh android`, which configures and builds FFmpeg with the app's NDK
+  into `native/build/ffmpeg/android/` (git-ignored). That takes a few minutes the first time; the
+  script keeps a fingerprint of its configuration and returns at once afterwards. Linux and macOS
+  work as they are; on Windows build in WSL.
+- For the native engine tests on the build machine and for the instrumented tests: ffmpeg,
+  dvdauthor and genisoimage, which author the test DVD, and for `test-engine.sh` also CMake, Ninja
+  and nasm (Debian/Ubuntu: `apt install ffmpeg dvdauthor genisoimage cmake ninja-build nasm`).
 
 Toolchain: Android Gradle plugin 9.4 with its built-in Kotlin support, Kotlin 2.4, Compose BOM
 2026.09. `compileSdk` is 37 because current AndroidX, Compose and OkHttp releases require it;
@@ -92,8 +128,15 @@ Commands (from the repository root):
 ./gradlew :app:testDebugUnitTest        # app unit tests on the JVM
 ./gradlew :app:assembleDebug            # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:lintDebug
+native/scripts/test-engine.sh           # rip engine on the build machine, plain and sanitized
+./gradlew :app:connectedDebugAndroidTest   # on a connected arm64 phone or an API 30+ emulator
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+The native scripts can also be used on their own: `native/scripts/make-test-dvd.sh out.iso folder`
+authors the test DVD, and `discrip_host` (in `native/build/host/` after `test-engine.sh`) lists
+titles (`discrip_host titles image.iso`), rips (`discrip_host rip image.iso 1 out.mkv --audio
+0x80:eng`) and reads a Matroska file back (`discrip_host probe out.mkv`).
 
 Release builds are minified with R8. Put a `keystore.properties` (git-ignored) next to this README
 to sign them with your own key:
@@ -116,11 +159,13 @@ them that way and the CMake build asks for it explicitly; `python3 scripts/check
 app/build/outputs/apk/debug/app-debug.apk` checks the ELF segments and their placement in the APK.
 
 **CI.** `.github/workflows/ci.yml` runs on every push, on Ubuntu 24.04 runners (pinned so the
-preinstalled NDK and CMake match): core tests; app unit tests, the debug APK (uploaded as the
-`discrip-debug-apk` artifact), lint and the 16 KB alignment check; instrumented tests on an API 30
-x86_64 emulator, whose ARM translation runs the arm64-only app; and a report of which pinned
-dependencies have newer stable releases (`python3 scripts/dependency_report.py` does the same
-locally).
+preinstalled NDK and CMake match): core tests; the rip engine tests on the runner
+(`native/scripts/test-engine.sh`); app unit tests, the debug and release APKs (the debug one is
+uploaded as the `discrip-debug-apk` artifact), lint and the 16 KB alignment check; instrumented
+tests on an API 30 x86_64 emulator, whose ARM translation runs the arm64-only app, including the
+end-to-end rip of the test DVD; and a report of which pinned dependencies have newer stable
+releases (`python3 scripts/dependency_report.py` does the same locally). The third-party sources
+and the FFmpeg builds are cached between runs.
 
 ## Credentials
 
@@ -151,16 +196,24 @@ core/                     Platform-independent Kotlin (separate Gradle build, Ma
   usb/                    Bulk-Only Transport: CBW/CSW, reset recovery, the BulkTransport interface
   scsi/                   SCSI/MMC command builders, response parsers, OpticalDrive
   disc/                   Block devices (drive, ISO file), ISO 9660/UDF reader, disc probe, monitor
+  dvd/                    Title list and rip report models, ISO 639 codes, track order, progress
   src/test/.../testing/   Simulated USB drive and disc images for the tests
   src/test/resources/images/  Disc image fixtures and the script that makes them
 app/                      Android app
   data/                   DataStore settings, encrypted secrets, local folder grants
   usb/                    libusb and Java USB transports, mass-storage interface lookup
   drive/                  DriveManager: discovery, permission, claim, polling
-  src/main/cpp/           CMake build of libusb and the JNI bridge
+  rip/                    RipManager, DVD sessions over JNI, SAF folder reader, output files
+  src/main/cpp/           CMake build of libusb, libdvdcss, libdvdread and the engine
+    engine/               The rip engine in C: sources, title plans, VOBU reader, remux to MKV
+    jni/, usb_jni.c       JNI bridges for the engine and for libusb
+    host/                 discrip_host, the engine's command-line driver for the build machine
+    config/               Hand-written config.h for libdvdcss and libdvdread
   ui/theme, ui/components HIG theme and components
-  ui/home, ui/metadata, ui/settings, ui/navigation
-native/scripts/           fetch-sources.sh: pinned, checksummed third-party sources
+  ui/home, ui/metadata, ui/settings, ui/source, ui/rip, ui/navigation
+native/scripts/           fetch-sources.sh (pinned, checksummed sources), build-ffmpeg.sh,
+                          make-test-dvd.sh, test-engine.sh
+native/tests/             test_engine.py: engine tests against the authored test DVD
 scripts/                  dependency_report.py, check_native_alignment.py, test_summary.py
 ```
 
@@ -234,15 +287,52 @@ These were made without asking because they do not change the architecture; each
     protocol errors); a region mismatch, a copy protection refusal or an address past the end fails
     at once, as retrying cannot help.
 
-## Next: CSS in phase 3
+14. **The rip engine is C, shared with a command-line driver.** Reading a title (cells, angle
+    blocks, interleaved units), lining up its timeline and remuxing it run in C on top of
+    libdvdread, libdvdcss and FFmpeg. The app calls it through JNI; `discrip_host` builds the same
+    code for the build machine, so the ripping logic is tested on every push without a phone, also
+    under AddressSanitizer and UBSan, and failures such as unreadable blocks or a full disk can be
+    injected.
+15. **Timestamps across VOBs.** Every VOB of a title can start its own clock (DVD authoring tools
+    and seamless branching do this). The reader takes each VOBU's start and end time from its
+    navigation pack; where a VOBU does not start where the previous one ended, it records an offset
+    by stream position, and the remuxer applies it to every packet. Chapters come from the cells
+    where programs start, at the time their first VOBU is written.
+16. **How the engine reads.** Images are read with `pread()` on a descriptor the app hands over, so
+    no JNI call is made per block. VIDEO_TS folders picked with the Storage Access Framework are
+    reached through libdvdread's filesystem callbacks: Kotlin answers `stat`, directory listings
+    and `open`, and the engine reads the descriptors it gets. libdvdread chooses its input
+    functions through process-wide pointers, so the app opens one DVD at a time.
+17. **Read errors.** A failed 32-block read is repeated block by block, each block up to three
+    times; blocks that stay unreadable are left out, the rip continues, and the result lists them.
+    Scrambled sectors that libdvdcss could not decrypt stop the title instead of producing garbage.
+18. **Output.** The MKV is written as `<name>.mkv.part` in its Plex folder and renamed when it is
+    complete and read back successfully (streams, duration, chapters); a cancelled or failed rip
+    deletes it. An earlier rip of the same film is only replaced after confirmation. Storage that
+    cannot rename gets the final name directly.
+19. **FFmpeg build.** FFmpeg 9.0.2, configured as LGPL (no `--enable-gpl`, no `--enable-nonfree`)
+    with only the demuxers, muxer, decoders, encoders, parsers and filters DiscRip uses (see
+    `native/scripts/build-ffmpeg.sh`), as shared libraries with unversioned names. The MediaCodec
+    encoders and the filters for the lossy presets are already in the build for phase 7.
+20. **Licenses.** libdvdcss and libdvdread are GPL-2.0-or-later and are linked statically into
+    `libdiscrip.so`, so that library, and with it the app, falls under the GPL. That is fine for a
+    personal app that is not distributed; anyone who passes the APK on must offer this source
+    code. FFmpeg (LGPL-2.1-or-later) and libusb (LGPL-2.1-or-later) stay separate shared libraries.
+21. **No foreground service yet.** Until phase 6 the rip runs while DiscRip is open: the rip screen
+    keeps the display (and with it the CPU) awake. Leaving the app during a rip can get it paused
+    or stopped by Android.
 
-Current drives (RPC-II) refuse to read CSS-scrambled sectors until the host has gone through CSS
-authentication (sense 05/6F/03, "read of scrambled sector without authentication"). libdvdcss's
-stream API, which DiscRip uses because apps cannot open `/dev/sr0`, cannot send SCSI commands
-itself, so it could only crack title keys from sectors the drive will not hand out. Phase 3
-therefore adds the authentication handshake (REPORT KEY and SEND KEY: AGID, challenges, bus key) to
-the Kotlin SCSI layer, run before libdvdcss reads, while libdvdcss recovers the title keys
-(`DVDCSS_METHOD=title`) as specified. The overall design stays as specified.
+## CSS on real drives (phase 6)
+
+Phase 3 rips images and VIDEO_TS folders. libdvdcss handles CSS in them as specified
+(`DVDCSS_METHOD=title`, keys cached in the app's cache directory): it recovers title keys from
+the scrambled sectors themselves. Current drives (RPC-II), however, refuse to hand out
+CSS-scrambled sectors until the host has gone through CSS authentication (sense 05/6F/03, "read of
+scrambled sector without authentication"). libdvdcss's stream API, which DiscRip uses because apps
+cannot open `/dev/sr0`, cannot send SCSI commands itself. Phase 6, which makes the USB drive a rip
+source, therefore adds the authentication handshake (REPORT KEY and SEND KEY: AGID, challenges,
+bus key) to the Kotlin SCSI layer, run before the engine reads, while libdvdcss still recovers the
+title keys. The overall design stays as specified.
 
 ## Hardware checklist
 
@@ -252,8 +342,8 @@ the Kotlin SCSI layer, run before libdvdcss reads, while libdvdcss recovers the 
 - An OTG adapter or USB-C hub that passes data (and charges the phone during long rips, if it can).
 - The drive's region set to 2 (RPC-2 drives refuse to read CSS-protected discs from other regions;
   the region can only be changed on a PC, a limited number of times).
-- Test material: an unencrypted DVD-Video ISO (generated in CI from phase 3) and a few real discs,
-  including one with many near-identical titles.
+- Test material: an unencrypted DVD-Video ISO (`native/scripts/make-test-dvd.sh`, also authored in
+  CI) and a few real discs, including one with many near-identical titles.
 
 Phase 2 on real hardware:
 
@@ -267,6 +357,21 @@ Phase 2 on real hardware:
    crash; plug it in again.
 7. Connect a USB stick on its own: DiscRip should report "Geen cd- of dvd-station" and not touch
    it again on the next connection.
+
+Phase 3 on a phone (no drive needed):
+
+1. In Instellingen › Bewaren, choose a local folder.
+2. Copy an unencrypted DVD image to the phone (the test DVD, or an ISO of one of your own discs)
+   and tap "ISO-bestand" on Home. The titles appear with the longest one marked "Hoofdfilm".
+3. Tap "Metadata kiezen", pick the film, then "Rip starten". Watch percentage, speed and time left;
+   the screen stays on.
+4. Open the MKV from `Films/<Title> (<Year>) {tmdb-<id>}/` in VLC or Plex: chapters, Dutch audio
+   first and marked default, the right display aspect ratio.
+5. Rip the same disc again: DiscRip asks before replacing the file. Cancel a rip halfway: no file
+   is left behind.
+6. Copy a VIDEO_TS folder to a USB stick, pick it with "VIDEO_TS-map" and rip it.
+7. Take the SD card or USB stick with the local folder out during a rip: the rip stops with a clear
+   message.
 
 ## Privacy
 

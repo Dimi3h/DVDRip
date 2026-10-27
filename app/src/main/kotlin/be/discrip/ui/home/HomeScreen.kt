@@ -1,5 +1,7 @@
 package be.discrip.ui.home
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,6 +17,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import be.discrip.AppContainer
 import be.discrip.R
 import be.discrip.drive.DriveMessage
+import be.discrip.rip.RipState
 import be.discrip.ui.components.AlertAction
 import be.discrip.ui.components.AlertActionStyle
 import be.discrip.ui.components.ButtonRow
@@ -26,6 +29,7 @@ import be.discrip.ui.components.NavigationRow
 import be.discrip.ui.components.SettingsIcon
 import be.discrip.ui.components.StatusRow
 import be.discrip.ui.icons.HigIcons
+import be.discrip.ui.rip.ripStatusLine
 import be.discrip.ui.settings.FolderAccess
 import be.discrip.ui.theme.HigTheme
 
@@ -39,10 +43,19 @@ fun HomeScreen(
     onOpenStorageSettings: () -> Unit,
     onOpenNasSettings: () -> Unit,
     onOpenPlexSettings: () -> Unit,
+    onOpenSource: (folder: Boolean, uri: String) -> Unit,
+    onOpenRip: () -> Unit,
 ) {
     val viewModel = viewModel { HomeViewModel(container) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val driveStatus by container.drives.status.collectAsStateWithLifecycle()
+    val ripState by container.rips.rip.collectAsStateWithLifecycle()
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) onOpenSource(false, uri.toString())
+    }
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) onOpenSource(true, uri.toString())
+    }
     val colors = HigTheme.colors
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var driveMessage by remember { mutableStateOf<DriveMessage?>(null) }
@@ -66,6 +79,26 @@ fun HomeScreen(
     }
 
     HigScaffold(title = stringResource(R.string.app_name), bottomPadding = bottomPadding) {
+        val rip = ripState
+        val job = when (rip) {
+            RipState.Idle -> null
+            is RipState.Running -> rip.job
+            is RipState.Succeeded -> rip.job
+            is RipState.Failed -> rip.job
+        }
+        if (job != null) {
+            GroupedSection(header = stringResource(R.string.home_rip_header)) {
+                row(IconRowSeparatorInset) {
+                    NavigationRow(
+                        title = if (job.metadata.year != null) "${job.metadata.title} (${job.metadata.year})" else job.metadata.title,
+                        subtitle = ripStatusLine(rip),
+                        onClick = onOpenRip,
+                        icon = { SettingsIcon(HigIcons.Film, if (rip is RipState.Failed) colors.orange else colors.accent) },
+                    )
+                }
+            }
+        }
+
         DriveSection(driveStatus, driveActions)
 
         val home = state ?: return@HigScaffold
@@ -90,15 +123,32 @@ fun HomeScreen(
             }
         }
 
+        val ripping = ripState is RipState.Running
         GroupedSection(
             header = stringResource(R.string.home_new_rip_header),
-            footer = stringResource(R.string.home_new_rip_footer),
+            footer = stringResource(if (ripping) R.string.home_rip_busy_footer else R.string.home_new_rip_footer),
         ) {
+            row(IconRowSeparatorInset) {
+                NavigationRow(
+                    title = stringResource(R.string.home_open_iso),
+                    onClick = { pickImage.launch(ISO_MIME_TYPES) },
+                    icon = { SettingsIcon(HigIcons.Disc, colors.accent) },
+                    enabled = !ripping,
+                )
+            }
+            row(IconRowSeparatorInset) {
+                NavigationRow(
+                    title = stringResource(R.string.home_open_folder),
+                    onClick = { pickFolder.launch(null) },
+                    icon = { SettingsIcon(HigIcons.Folder, colors.accent) },
+                    enabled = !ripping,
+                )
+            }
             row(IconRowSeparatorInset) {
                 NavigationRow(
                     title = stringResource(R.string.home_metadata_row),
                     onClick = onNewRip,
-                    icon = { SettingsIcon(HigIcons.Disc, colors.accent) },
+                    icon = { SettingsIcon(HigIcons.MagnifyingGlass, colors.indigo) },
                 )
             }
         }
@@ -182,3 +232,9 @@ fun HomeScreen(
         )
     }
 }
+
+/**
+ * What the image picker offers: Android's own type for .iso, the freedesktop one some providers
+ * use, and files of unknown type. The picked file is checked for VIDEO_TS before use.
+ */
+private val ISO_MIME_TYPES = arrayOf("application/x-iso9660-image", "application/x-cd-image", "application/octet-stream")

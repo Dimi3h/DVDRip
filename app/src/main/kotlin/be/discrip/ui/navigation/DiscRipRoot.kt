@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.core.net.toUri
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -31,7 +33,10 @@ import be.discrip.ui.components.HigTabBar
 import be.discrip.ui.components.TabItem
 import be.discrip.ui.home.HomeScreen
 import be.discrip.ui.icons.HigIcons
+import be.discrip.rip.DvdSource
 import be.discrip.ui.metadata.MetadataScreen
+import be.discrip.ui.rip.RipScreen
+import be.discrip.ui.source.SourceScreen
 import be.discrip.ui.settings.MetadataSettingsScreen
 import be.discrip.ui.settings.NasSettingsScreen
 import be.discrip.ui.settings.PlexSettingsScreen
@@ -89,6 +94,8 @@ fun DiscRipRoot(container: AppContainer) {
                         onOpenStorageSettings = { navController.navigate(StorageSettingsRoute) },
                         onOpenNasSettings = { navController.navigate(NasSettingsRoute) },
                         onOpenPlexSettings = { navController.navigate(PlexSettingsRoute) },
+                        onOpenSource = { folder, uri -> navController.navigate(SourceRoute(folder, uri)) },
+                        onOpenRip = { navController.navigate(RipRoute) },
                     )
                 }
             }
@@ -113,6 +120,30 @@ fun DiscRipRoot(container: AppContainer) {
                     onBack = { navController.popIfResumed(entry) },
                     onDone = { navController.popIfResumed(entry) },
                     onOpenSettings = { navController.navigate(MetadataSettingsRoute) },
+                )
+            }
+            composable<SourceRoute> { entry ->
+                val route = entry.toRoute<SourceRoute>()
+                val source = remember(route) {
+                    if (route.folder) DvdSource.Folder(route.uri.toUri()) else DvdSource.Image(route.uri.toUri())
+                }
+                SourceScreen(
+                    container = container,
+                    source = source,
+                    backLabel = stringResource(R.string.app_name),
+                    onBack = { navController.popIfResumed(entry) },
+                    onOpenMetadata = { label -> navController.navigate(MetadataRoute(volumeLabel = label)) },
+                    onOpenStorageSettings = { navController.navigate(StorageSettingsRoute) },
+                    // The rip screen takes the source screen's place, so Back from it leads Home.
+                    onRipStarted = { navController.navigate(RipRoute) { popUpTo(HomeRoute) } },
+                )
+            }
+            composable<RipRoute> { entry ->
+                RipScreen(
+                    container = container,
+                    backLabel = stringResource(R.string.app_name),
+                    onBack = { navController.popIfResumed(entry) },
+                    onFinished = { navController.popBackStack(HomeRoute, inclusive = false) },
                 )
             }
             composable<QualitySettingsRoute> { entry ->

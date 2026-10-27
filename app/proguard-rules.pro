@@ -11,3 +11,13 @@
 -dontwarn com.google.errorprone.annotations.CheckReturnValue
 -dontwarn com.google.errorprone.annotations.Immutable
 -dontwarn com.google.errorprone.annotations.RestrictedApi
+
+# Called by name from native code (app/src/main/cpp/jni/rip_jni.c).
+-keep class be.discrip.rip.NativeFolder {
+    long stat(byte[]);
+    byte[][] list(byte[]);
+    int open(byte[]);
+}
+-keep interface be.discrip.rip.NativeProgress {
+    void onProgress(long, long, long, long);
+}

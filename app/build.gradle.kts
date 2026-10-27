@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
+import javax.inject.Inject
 
 // AGP 9 compiles Kotlin itself (built-in Kotlin); the root build pins the Kotlin Gradle plugin
 // version so the app and the core build use the same compiler.
@@ -113,8 +114,57 @@ val fetchNativeSources by tasks.registering(Exec::class) {
     commandLine("bash", script.absolutePath)
 }
 
-tasks.named("preBuild") {
+// FFmpeg is configured and built by its own script with the NDK the app uses (CMake then links
+// the result). The script keeps a fingerprint and returns at once when nothing changed.
+val buildFfmpeg by tasks.registering(Exec::class) {
+    description = "Builds FFmpeg for arm64-v8a from the pinned sources."
     dependsOn(fetchNativeSources)
+    val script = rootProject.file("native/scripts/build-ffmpeg.sh")
+    val ndk = androidComponents.sdkComponents.ndkDirectory
+    inputs.file(script)
+    commandLine("bash", script.absolutePath, "android")
+    doFirst { environment("ANDROID_NDK_HOME", ndk.get().asFile.absolutePath) }
+}
+
+tasks.named("preBuild") {
+    dependsOn(fetchNativeSources, buildFfmpeg)
+}
+
+/**
+ * Authors the small unencrypted DVD the instrumented rip tests use, as an image and as a VIDEO_TS
+ * folder (native/scripts/make-test-dvd.sh; needs ffmpeg, dvdauthor and genisoimage).
+ */
+abstract class GenerateTestDvd : DefaultTask() {
+    @get:InputFile
+    abstract val script: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun generate() {
+        val output = outputDir.get().asFile
+        output.deleteRecursively()
+        output.mkdirs()
+        execOperations.exec {
+            commandLine("bash", script.get().asFile.absolutePath, output.resolve("test-dvd.iso").path, output.resolve("folder").path)
+        }
+    }
+}
+
+val generateTestDvd by tasks.registering(GenerateTestDvd::class) {
+    description = "Authors the test DVD for the instrumented rip tests."
+    script = rootProject.layout.projectDirectory.file("native/scripts/make-test-dvd.sh")
+    outputDir = layout.buildDirectory.dir("generated/testDvd")
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.androidTest?.sources?.assets?.addGeneratedSourceDirectory(generateTestDvd, GenerateTestDvd::outputDir)
+    }
 }
 
 dependencies {

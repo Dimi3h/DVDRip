@@ -9,6 +9,8 @@ import be.discrip.data.LocalFolderAccess
 import be.discrip.data.SecretStore
 import be.discrip.data.SettingsRepository
 import be.discrip.drive.DriveManager
+import be.discrip.rip.RipLabels
+import be.discrip.rip.RipManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +26,8 @@ private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 class AppContainer(context: Context) {
 
     private val appContext = context.applicationContext
+
+    val appContentResolver get() = appContext.contentResolver
 
     /** Work that outlives screens, such as the USB drive. */
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -41,6 +45,11 @@ class AppContainer(context: Context) {
     val plex = PlexClient(httpClient)
     val ripDraft = RipDraft()
     val drives = DriveManager(appContext, applicationScope)
+
+    /** Created on first use, which also loads the native engine. */
+    val rips: RipManager by lazy {
+        RipManager(appContext.contentResolver, appContext.cacheDir, RipLabels(appContext), applicationScope)
+    }
 }
 
 /** The rip being prepared. Filled step by step by the Disc and Metadata screens. */

@@ -9,8 +9,16 @@ third_party="$native_dir/third_party"
 downloads="$third_party/.downloads"
 
 # name|version|sha256|archive|mirror URLs (space separated)
+#
+# Checksums were taken from the projects' own release files and cross-checked: libusb against
+# its GitHub, SourceForge and Debian copies; libdvdcss and libdvdread against VideoLAN's .sha256
+# files and release signature (key 65F7C6B4206BD057A7EB73787180713BE58D1ADC); FFmpeg against its
+# release signature (key FCF986EA15E6E293A5644F10B4322F04D67658D8).
 sources=(
     "libusb|1.0.30|fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf|libusb-1.0.30.tar.bz2|https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2 https://downloads.sourceforge.net/project/libusb/libusb-1.0/libusb-1.0.30/libusb-1.0.30.tar.bz2"
+    "libdvdcss|1.6.0|7ea556c846b7bfc32d47b41cae56d1863a6b6d5f706bb162778d6f298490977c|libdvdcss-1.6.0.tar.xz|https://download.videolan.org/pub/videolan/libdvdcss/1.6.0/libdvdcss-1.6.0.tar.xz https://get.videolan.org/libdvdcss/1.6.0/libdvdcss-1.6.0.tar.xz"
+    "libdvdread|7.1.1|a0d47876548bec806774bbf8dbf20bb19ba139464383156b32eb8e59915b90a9|libdvdread-7.1.1.tar.xz|https://download.videolan.org/pub/videolan/libdvdread/7.1.1/libdvdread-7.1.1.tar.xz https://get.videolan.org/libdvdread/7.1.1/libdvdread-7.1.1.tar.xz"
+    "ffmpeg|9.0.2|8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e|ffmpeg-9.0.2.tar.xz|https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz https://www.ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz"
 )
 
 sha256() {
