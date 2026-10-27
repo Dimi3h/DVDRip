@@ -109,7 +109,8 @@ add_library(engine STATIC
     engine/dr_probe.c
     engine/dr_reader.c
     engine/dr_rip.c
-    engine/dr_source.c)
+    engine/dr_source.c
+    engine/dr_video.c)
 target_include_directories(engine PUBLIC engine)
 target_compile_options(engine PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(engine PUBLIC dvdread ff_avformat ff_avfilter ff_avcodec ff_swscale ff_avutil)

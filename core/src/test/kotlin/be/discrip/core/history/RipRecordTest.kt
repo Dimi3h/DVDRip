@@ -1,7 +1,9 @@
 package be.discrip.core.history
 
 import be.discrip.core.dvd.RipFailure
+import be.discrip.core.model.QualityPreset
 import be.discrip.core.model.StorageTarget
+import be.discrip.core.model.VideoCodec
 import be.discrip.core.nas.NasProblem
 import be.discrip.core.plex.PlexResult
 import kotlinx.serialization.SerializationException
@@ -43,9 +45,25 @@ class RipRecordTest {
         plex = PlexResult.NOT_SEEN,
     )
 
+    private val lossy = done.copy(
+        id = "d",
+        preset = QualityPreset.BALANCED,
+        videoCodec = VideoCodec.H264,
+        videoEncoder = "c2.qti.avc.encoder",
+        videoHardware = true,
+    )
+
     @Test
     fun `records survive a round trip`() {
-        assertEquals(listOf(done, failed), RipHistoryJson.decode(RipHistoryJson.encode(listOf(done, failed))))
+        assertEquals(listOf(done, failed, lossy), RipHistoryJson.decode(RipHistoryJson.encode(listOf(done, failed, lossy))))
+    }
+
+    @Test
+    fun `records from before the lossy presets have no preset`() {
+        val record = RipHistoryJson.decode("""[{"id":"e","endedAt":1,"title":"X"}]""").single()
+
+        assertEquals(null, record.preset)
+        assertEquals(null, record.videoEncoder)
     }
 
     @Test

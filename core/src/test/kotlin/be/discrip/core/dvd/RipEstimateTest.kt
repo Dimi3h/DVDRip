@@ -1,6 +1,7 @@
 package be.discrip.core.dvd
 
 import be.discrip.core.estimate.SizeEstimator
+import be.discrip.core.model.QualityPreset
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -39,6 +40,23 @@ class RipEstimateTest {
         val disc = film.sizeBytes / SizeEstimator.PROGRAM_STREAM_OVERHEAD * SizeEstimator.CONTAINER_OVERHEAD
 
         assertEquals(disc, bytes.toDouble(), disc * 0.01)
+    }
+
+    @Test
+    fun `a lossy preset takes its own video bit rate with the same audio and subtitles`() {
+        val audio = RipPlanning.audioTracks(film)
+        val subtitles = RipPlanning.subtitleTracks(film)
+
+        val balanced = RipEstimate.bytes(film, QualityPreset.BALANCED, null, audio, subtitles, lpcmToFlac = false)
+        val configured = RipEstimate.bytes(film, QualityPreset.BALANCED, 4_000, audio, subtitles, lpcmToFlac = false)
+
+        // (2 500 + 448 + 20) kbit/s for two hours: about 2.7 GB; 1 500 kbit/s more is 1.35 GB more.
+        assertEquals(2_671_200_000.0 * SizeEstimator.CONTAINER_OVERHEAD, balanced.toDouble(), 1_000_000.0)
+        assertEquals(1_350_000_000.0 * SizeEstimator.CONTAINER_OVERHEAD, (configured - balanced).toDouble(), 1_000_000.0)
+        assertEquals(
+            RipEstimate.losslessBytes(film, audio, subtitles, lpcmToFlac = false),
+            RipEstimate.bytes(film, QualityPreset.LOSSLESS, 4_000, audio, subtitles, lpcmToFlac = false),
+        )
     }
 
     @Test

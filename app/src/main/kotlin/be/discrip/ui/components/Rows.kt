@@ -187,6 +187,7 @@ fun CheckRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     trailingText: String? = null,
+    enabled: Boolean = true,
 ) {
     val colors = HigTheme.colors
     val haptics = rememberHaptics()
@@ -196,9 +197,10 @@ fun CheckRow(
             if (!checked) haptics.selection()
             onClick()
         },
+        enabled = enabled,
         role = Role.RadioButton,
     ) {
-        RowTexts(title, subtitle, colors.label, Modifier.weight(1f))
+        RowTexts(title, subtitle, if (enabled) colors.label else colors.tertiaryLabel, Modifier.weight(1f))
         if (trailingText != null) {
             Text(trailingText, style = HigTheme.typography.subheadline, color = colors.secondaryLabel)
         }

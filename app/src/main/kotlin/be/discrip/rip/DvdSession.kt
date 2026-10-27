@@ -7,6 +7,7 @@ import be.discrip.core.dvd.EngineJson
 import be.discrip.core.dvd.MkvSummary
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.dvd.RipOutcome
+import be.discrip.core.video.VideoEncoding
 import java.io.Closeable
 
 /** One audio or subtitle track of a rip, in output order. */
@@ -33,6 +34,20 @@ data class RipRequest(
     val chapterNames: List<String>,
     /** More Matroska tags of the film, such as IMDB, TMDB and SUMMARY. */
     val tags: Map<String, String> = emptyMap(),
+    /** The encoder of a lossy preset; null copies the video. */
+    val video: VideoEncoding? = null,
+    val videoBitRateKbps: Int = 0,
+)
+
+/** Where a rip stands, as the engine reports it about twice a second. */
+data class EngineProgress(
+    val sectorsDone: Long,
+    val sectorsTotal: Long,
+    val outputBytes: Long,
+    /** How far into the title the written video has come. */
+    val positionMs: Long,
+    /** Video frames encoded so far; 0 when the video is copied. */
+    val framesEncoded: Long,
 )
 
 /**
@@ -56,8 +71,7 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
 
     /**
      * Rips to [output], a descriptor open for reading and writing or a [NativeFile]; it stays the
-     * caller's. [onProgress] gets sectors done, sectors in total, bytes written and the position
-     * in the title.
+     * caller's. [onProgress] hears how far the rip has come.
      *
      * [isCancelled] is the caller's own flag for this rip. [cancel] stops the engine at once, but a
      * cancel that comes just before the engine starts would be lost, so the flag is checked here
@@ -67,14 +81,14 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
         request: RipRequest,
         output: EngineFile,
         isCancelled: () -> Boolean,
-        onProgress: (Long, Long, Long, Long) -> Unit,
+        onProgress: (EngineProgress) -> Unit,
     ): RipOutcome =
         synchronized(callLock) {
             checkOpen()
             if (isCancelled()) return RipOutcome.Failure(RipFailure.CANCELLED, "The rip was cancelled")
-            val listener = NativeProgress { done, total, bytes, position ->
+            val listener = NativeProgress { done, total, bytes, position, frames ->
                 if (isCancelled()) NativeRip.cancel(handle)
-                onProgress(done, total, bytes, position)
+                onProgress(EngineProgress(done, total, bytes, position, frames))
             }
             val report = NativeRip.rip(
                 session = handle,
@@ -94,6 +108,10 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
                 tagKeys = request.tags.keys.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 tagValues = request.tags.values.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 chapterNames = request.chapterNames.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
+                videoEncoder = request.video?.ffmpegEncoder?.encodeToByteArray(),
+                videoComponent = request.video?.component?.encodeToByteArray(),
+                videoBitRate = request.videoBitRateKbps * 1000L,
+                videoBitrateMode = request.video?.bitrateMode?.ffmpegName?.encodeToByteArray(),
                 outputFd = (output as? EngineFile.Descriptor)?.descriptor?.fd ?: -1,
                 output = (output as? EngineFile.Callbacks)?.file,
                 listener = listener,

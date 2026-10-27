@@ -8,6 +8,7 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.system.ErrnoException
 import android.system.Os
+import android.util.Log
 import androidx.core.net.toUri
 import be.discrip.core.css.CssAuthenticationException
 import be.discrip.core.disc.DiscProbe
@@ -29,6 +30,7 @@ import be.discrip.core.history.PendingUpload
 import be.discrip.core.history.RipRecord
 import be.discrip.core.history.RipResult
 import be.discrip.core.model.MovieMetadata
+import be.discrip.core.model.QualityPreset
 import be.discrip.core.naming.RipPath
 import be.discrip.core.nas.Nas
 import be.discrip.core.nas.NasException
@@ -43,6 +45,8 @@ import be.discrip.core.plex.PlexPublisher
 import be.discrip.core.plex.PlexResult
 import be.discrip.core.plex.result
 import be.discrip.core.settings.AppSettings
+import be.discrip.core.video.VideoEncoding
+import be.discrip.core.video.VideoPlan
 import be.discrip.data.HistoryStore
 import be.discrip.data.Secrets
 import kotlinx.coroutines.CancellationException
@@ -65,6 +69,8 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+
+private const val TAG = "DiscRip"
 
 /** A DVD to rip: an ISO image or a VIDEO_TS folder picked in the document UI, or the disc in the USB drive. */
 sealed interface DvdSource {
@@ -136,6 +142,9 @@ data class RipJob(
     /** The size the rip is expected to reach; the free-space check asks for 10 % more. */
     val estimatedBytes: Long,
     val destination: RipDestination,
+    val quality: QualityPreset = QualityPreset.LOSSLESS,
+    /** The encoders and bit rate of a lossy [quality]; null for the copy. */
+    val video: VideoPlan? = null,
 )
 
 enum class RipStage {
@@ -194,6 +203,8 @@ sealed interface RipState {
         val cancelling: Boolean = false,
         /** The disc from the drive is done and came out; the next can go in while the file travels. */
         val discEjected: Boolean = false,
+        /** The encoder a lossy preset uses; null for the copy. */
+        val encoder: VideoEncoding? = null,
     ) : RipState
 
     /** The disc was ripped; [nas] and [plex] tell whether the file also got where it was meant to. */
@@ -209,6 +220,8 @@ sealed interface RipState {
         val nas: NasOutcome? = null,
         /** Null when Plex was not asked. */
         val plex: PlexOutcome? = null,
+        /** The encoder a lossy preset used; null for the copy. */
+        val encoder: VideoEncoding? = null,
     ) : RipState
 
     /**
@@ -532,8 +545,8 @@ class RipManager(
 
     /** The engine's part: the rip into [output], read back, under its final name. */
     private fun ripInto(job: RipJob, dvd: DvdSession, output: RipOutput, needed: Long, cancelled: AtomicBoolean): RipState {
-        val tracker = ProgressTracker(SystemClock::elapsedRealtime)
         var free: Long? = null
+        var encoder: VideoEncoding? = null
         val (outcome, summary) = try {
             output.open().use { file ->
                 if (file is EngineFile.Descriptor) {
@@ -544,10 +557,22 @@ class RipManager(
                 // A locked tray keeps the disc in while it is read.
                 drive?.preventRemoval(true)
                 val outcome = try {
-                    dvd.rip(request(job), file, cancelled::get) { done, total, bytes, position ->
-                        val progress = tracker.update(done, total, bytes, position)
-                        ripState.update { if (it is RipState.Running) it.copy(progress = progress) else it }
+                    // An encoder that will not start fails before anything is written, so the next can take over.
+                    val encoders: List<VideoEncoding?> = job.video?.encoders ?: listOf(null)
+                    var attempt: RipOutcome? = null
+                    for ((index, candidate) in encoders.withIndex()) {
+                        encoder = candidate
+                        ripState.update { if (it is RipState.Running) it.copy(encoder = candidate) else it }
+                        val tracker = ProgressTracker(SystemClock::elapsedRealtime)
+                        attempt = dvd.rip(request(job, candidate), file, cancelled::get) { engine ->
+                            val progress = tracker.update(engine.sectorsDone, engine.sectorsTotal, engine.outputBytes, engine.positionMs, engine.framesEncoded)
+                            ripState.update { if (it is RipState.Running) it.copy(progress = progress) else it }
+                        }
+                        val unavailable = (attempt as? RipOutcome.Failure)?.reason == RipFailure.ENCODER_UNAVAILABLE
+                        if (!unavailable || index == encoders.lastIndex) break
+                        Log.w(TAG, "${candidate?.component} would not start (${(attempt as RipOutcome.Failure).message}); trying the next encoder")
                     }
+                    checkNotNull(attempt)
                 } finally {
                     ripping = null
                     drive?.preventRemoval(false)
@@ -584,7 +609,7 @@ class RipManager(
         }
         return try {
             output.complete()
-            RipState.Succeeded(job, outcome, file, localFile = job.destination.local?.displayPath)
+            RipState.Succeeded(job, outcome, file, localFile = job.destination.local?.displayPath, encoder = encoder)
         } catch (e: NasException) {
             output.discard()
             nasFailure(job, e)
@@ -704,6 +729,8 @@ class RipManager(
     /** Adds the finished rip to the history. */
     private suspend fun record(job: RipJob, state: RipState, pending: PendingUpload?) {
         val metadata = job.metadata
+        // The encoder that did the work, or the first one tried.
+        val encoder = (state as? RipState.Succeeded)?.encoder ?: job.video?.encoder
         val base = RipRecord(
             id = UUID.randomUUID().toString(),
             endedAt = System.currentTimeMillis(),
@@ -712,6 +739,10 @@ class RipManager(
             sourceName = job.sourceName,
             titleNumber = job.title.number,
             storage = job.destination.storage,
+            preset = job.quality,
+            videoCodec = encoder?.codec,
+            videoEncoder = encoder?.component,
+            videoHardware = encoder?.hardware,
         )
         val record = when (state) {
             is RipState.Succeeded -> base.copy(
@@ -737,7 +768,7 @@ class RipManager(
         history.add(record)
     }
 
-    private fun request(job: RipJob) = RipRequest(
+    private fun request(job: RipJob, encoder: VideoEncoding?) = RipRequest(
         title = job.title.number,
         audio = job.audio.map { RipTrack(it.streamId, it.language, labels.trackName(it), it.flags) },
         subtitles = job.subtitles.map { RipTrack(it.streamId, it.language, labels.subtitleName(it), it.flags) },
@@ -746,6 +777,8 @@ class RipManager(
         releaseDate = job.metadata.year?.toString(),
         chapterNames = (1..job.title.chapterStartsMs.size).map(labels::chapterName),
         tags = filmTags(job.metadata),
+        video = encoder,
+        videoBitRateKbps = job.video?.bitRateKbps ?: 0,
     )
 
     /** Matroska's IMDB, TMDB and SUMMARY tags, which media centres such as Kodi and Jellyfin read. */

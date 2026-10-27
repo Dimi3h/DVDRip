@@ -497,7 +497,7 @@ static void on_progress(void *opaque, const dr_progress *progress) {
     rip_call *call = opaque;
     (*call->env)->CallVoidMethod(call->env, call->listener, call->on_progress, (jlong) progress->sectors_done,
                                  (jlong) progress->sectors_total, (jlong) progress->output_bytes,
-                                 (jlong) progress->position_ms);
+                                 (jlong) progress->position_ms, (jlong) progress->frames_encoded);
     failed_call(call->env);
 }
 
@@ -574,7 +574,8 @@ static void release_tracks(JNIEnv *env, jintArray ids, jintArray flags, track_ar
 /*
  * Rips a title to output_file when given, else to output_fd; both stay the caller's. Tracks are
  * given in output order, as parallel arrays: stream id, DR_TRACK_ flags, language (ISO 639-2/B)
- * and name, the last two possibly null.
+ * and name, the last two possibly null. With video_encoder the video is re-encoded (the lossy
+ * presets) by that FFmpeg encoder, on the MediaCodec component video_component.
  */
 JNIEXPORT jbyteArray JNICALL
 Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint title, jint angle,
@@ -582,14 +583,15 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
                                   jobjectArray audio_names, jintArray subtitle_ids, jintArray subtitle_flags,
                                   jobjectArray subtitle_languages, jobjectArray subtitle_names, jboolean lpcm_to_flac,
                                   jbyteArray movie_title, jbyteArray release_date, jobjectArray tag_keys,
-                                  jobjectArray tag_values, jobjectArray chapter_names, jint output_fd,
-                                  jobject output_file, jobject listener) {
+                                  jobjectArray tag_values, jobjectArray chapter_names, jbyteArray video_encoder,
+                                  jbyteArray video_component, jlong video_bit_rate, jbyteArray video_bitrate_mode,
+                                  jint output_fd, jobject output_file, jobject listener) {
     (void) clazz;
     session *s = session_of(handle);
     atomic_store(&s->cancel, 0);
 
     jclass listener_type = (*env)->GetObjectClass(env, listener);
-    jmethodID on_progress_id = (*env)->GetMethodID(env, listener_type, "onProgress", "(JJJJ)V");
+    jmethodID on_progress_id = (*env)->GetMethodID(env, listener_type, "onProgress", "(JJJJJ)V");
     (*env)->DeleteLocalRef(env, listener_type);
     if (on_progress_id == NULL) return NULL; /* NoSuchMethodError pending */
     java_file output = {0};
@@ -610,6 +612,9 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
     char **values = NULL;
     char *movie = text_of(env, movie_title);
     char *date = text_of(env, release_date);
+    char *encoder = text_of(env, video_encoder);
+    char *component = text_of(env, video_component);
+    char *bitrate_mode = text_of(env, video_bitrate_mode);
     int chapter_count = texts_of(env, chapter_names, &chapters);
     int key_count = texts_of(env, tag_keys, &keys);
     int value_count = texts_of(env, tag_values, &values);
@@ -618,7 +623,9 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
 
     char *report;
     if (audio == NULL || subtitles == NULL || chapter_count < 0 || key_count < 0 || value_count != key_count ||
-        (movie_title != NULL && movie == NULL) || (release_date != NULL && date == NULL)) {
+        (movie_title != NULL && movie == NULL) || (release_date != NULL && date == NULL) ||
+        (video_encoder != NULL && encoder == NULL) || (video_component != NULL && component == NULL) ||
+        (video_bitrate_mode != NULL && bitrate_mode == NULL)) {
         report = NULL;
     } else {
         for (int i = 0; i < audio_in.count; i++) {
@@ -644,6 +651,10 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
             .chapter_names = (const char *const *) chapters,
             .chapter_name_count = chapter_count,
             .output = output_file != NULL ? java_file_as_file(&output) : dr_fd_as_file(output_fd),
+            .video_encoder = encoder,
+            .video_component = component,
+            .video_bit_rate = video_bit_rate,
+            .video_bitrate_mode = bitrate_mode,
         };
         rip_call call = {env, listener, on_progress_id, s};
         dr_rip_hooks hooks = {&call, on_progress, is_cancelled};
@@ -660,6 +671,9 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
     free(subtitles);
     free(movie);
     free(date);
+    free(encoder);
+    free(component);
+    free(bitrate_mode);
     return take_json(env, report);
 }
 

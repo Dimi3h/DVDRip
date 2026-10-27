@@ -2,8 +2,9 @@ package be.discrip.core.dvd
 
 import be.discrip.core.estimate.AudioStreamEstimate
 import be.discrip.core.estimate.SizeEstimator
+import be.discrip.core.model.QualityPreset
 
-/** Size of a lossless rip, before it starts: for the screen and for the free-space check. */
+/** Size of a rip, before it starts: for the screen and for the free-space check. */
 object RipEstimate {
 
     /**
@@ -25,16 +26,36 @@ object RipEstimate {
      */
     fun losslessBytes(title: DvdTitle, audio: List<AudioTrackPlan>, subtitles: List<SubtitleTrackPlan>, lpcmToFlac: Boolean): Long {
         val seconds = title.durationMs / 1000.0
-        val byId = title.audio.associateBy { it.streamId }
         val videoKbps = SizeEstimator.sourceVideoKbps(
             titleBytes = title.sizeBytes,
             durationSeconds = seconds,
             allAudioKbps = title.audio.map(::audioKbps),
             subtitleStreams = title.subtitles.size,
         ) ?: SizeEstimator.TYPICAL_DVD_VIDEO_KBPS
-        val chosenAudio = audio.mapNotNull { plan ->
+        return SizeEstimator.estimateBytes(seconds, videoKbps, chosenAudio(title, audio), subtitles.size, lpcmToFlac)
+    }
+
+    /**
+     * Bytes the MKV will take with [preset]: [losslessBytes] for the copy, else the preset's video
+     * bit rate ([videoKbps] from the settings, or its default) with the same audio and subtitles.
+     */
+    fun bytes(
+        title: DvdTitle,
+        preset: QualityPreset,
+        videoKbps: Int?,
+        audio: List<AudioTrackPlan>,
+        subtitles: List<SubtitleTrackPlan>,
+        lpcmToFlac: Boolean,
+    ): Long {
+        if (!preset.isLossy) return losslessBytes(title, audio, subtitles, lpcmToFlac)
+        val kbps = SizeEstimator.videoKbps(preset, videoKbps, measuredSourceVideoKbps = null)
+        return SizeEstimator.estimateBytes(title.durationMs / 1000.0, kbps, chosenAudio(title, audio), subtitles.size, lpcmToFlac)
+    }
+
+    private fun chosenAudio(title: DvdTitle, audio: List<AudioTrackPlan>): List<AudioStreamEstimate> {
+        val byId = title.audio.associateBy { it.streamId }
+        return audio.mapNotNull { plan ->
             byId[plan.streamId]?.let { AudioStreamEstimate(audioKbps(it), isLpcm = it.codec == AudioCodec.LPCM) }
         }
-        return SizeEstimator.estimateBytes(seconds, videoKbps, chosenAudio, subtitles.size, lpcmToFlac)
     }
 }

@@ -8,10 +8,12 @@
  *   discrip_host rip <image.iso | --dir folder> <title> <out.mkv> [--audio id[:lang[:name]],...]
  *                [--default-audio id] [--flac] [--movie-title text] [--date yyyy] [--cancel-after blocks]
  *                [--subs id[:lang[:name]],...] [--forced-sub id] [--tag KEY=value]... [--bad-blocks lba:count]
- *                [--callbacks] [--fail-write-at bytes[:nospace]]
+ *                [--callbacks] [--fail-write-at bytes[:nospace]] [--encoder name [--bitrate bit/s]]
  *
  * --callbacks writes and reads the MKV the way the app reaches the NAS: through callbacks, which
  * here return short reads; --fail-write-at makes them fail once the file would pass that size.
+ * --encoder re-encodes the video as the lossy presets do, with an FFmpeg encoder of this build
+ * (mpeg4 on the build machine, where there is no MediaCodec).
  *
  * Output is the engine's JSON on stdout; progress and log lines go to stderr.
  */
@@ -194,9 +196,9 @@ static dr_dvd *open_source(int argc, char **argv, int *next) {
 
 static void on_progress(void *opaque, const dr_progress *progress) {
     (void) opaque;
-    fprintf(stderr, "progress %llu/%llu sectors, %lld bytes written, at %lld ms\n",
+    fprintf(stderr, "progress %llu/%llu sectors, %lld bytes written, at %lld ms, %lld frames encoded\n",
             (unsigned long long) progress->sectors_done, (unsigned long long) progress->sectors_total,
-            (long long) progress->output_bytes, (long long) progress->position_ms);
+            (long long) progress->output_bytes, (long long) progress->position_ms, (long long) progress->frames_encoded);
 }
 
 static int cancelled(void *opaque) {
@@ -263,6 +265,11 @@ int main(int argc, char **argv) {
                 use_callbacks = 1;
                 callbacks.fail_at = strtoll(argv[++i], &end, 0);
                 callbacks.fail_errno = end != NULL && strcmp(end, ":nospace") == 0 ? ENOSPC : EIO;
+            } else if (strcmp(argv[i], "--encoder") == 0 && i + 1 < argc) {
+                options.video_encoder = argv[++i];
+                if (options.video_bit_rate == 0) options.video_bit_rate = 2500000;
+            } else if (strcmp(argv[i], "--bitrate") == 0 && i + 1 < argc) {
+                options.video_bit_rate = strtoll(argv[++i], NULL, 0);
             } else if (strcmp(argv[i], "--movie-title") == 0 && i + 1 < argc) {
                 options.movie_title = argv[++i];
             } else if (strcmp(argv[i], "--date") == 0 && i + 1 < argc) {

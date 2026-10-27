@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <libavformat/avformat.h>
+#include <stdio.h>
 
 #define BUFFER_SIZE (64 * 1024)
 
@@ -92,6 +93,16 @@ char *dr_probe(const dr_file *file) {
             if (par->codec_type == AVMEDIA_TYPE_VIDEO) {
                 dr_json_key(&json, "width"); dr_json_int(&json, par->width);
                 dr_json_key(&json, "height"); dr_json_int(&json, par->height);
+                /* As players show it: the frame stretched by the pixel shape Matroska records. */
+                AVRational sar = st->sample_aspect_ratio.num > 0 ? st->sample_aspect_ratio : par->sample_aspect_ratio;
+                if (sar.num <= 0 || sar.den <= 0) sar = (AVRational) {1, 1};
+                if (par->width > 0 && par->height > 0) {
+                    AVRational dar;
+                    av_reduce(&dar.num, &dar.den, (int64_t) par->width * sar.num, (int64_t) par->height * sar.den, 1 << 20);
+                    char aspect[32];
+                    snprintf(aspect, sizeof(aspect), "%d:%d", dar.num, dar.den);
+                    dr_json_key(&json, "displayAspect"); dr_json_string(&json, aspect);
+                }
             } else if (par->codec_type == AVMEDIA_TYPE_AUDIO) {
                 dr_json_key(&json, "channels"); dr_json_int(&json, par->ch_layout.nb_channels);
                 dr_json_key(&json, "sampleRate"); dr_json_int(&json, par->sample_rate);

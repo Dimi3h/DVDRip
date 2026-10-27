@@ -132,7 +132,7 @@ class RipEndToEndTest {
             var reports = 0
             val outcome = descriptor(output).use { file ->
                 // The engine reports progress with its first packet; cancelling there stops it mid-title.
-                session.rip(request, file, isCancelled = { false }) { _, _, _, _ ->
+                session.rip(request, file, isCancelled = { false }) {
                     reports++
                     session.cancel()
                 }
@@ -156,7 +156,7 @@ class RipEndToEndTest {
             val audio = RipPlanning.audioTracks(extra).map { RipTrack(it.streamId, it.language, null, it.flags) }
             val request = RipRequest(2, audio = audio, lpcmToFlac = false, movieTitle = "Extra", releaseDate = null, chapterNames = emptyList())
             descriptor(output).use { file ->
-                val outcome = session.rip(request, file, isCancelled = { false }) { _, _, _, _ -> }
+                val outcome = session.rip(request, file, isCancelled = { false }) { }
                 assertTrue(outcome.toString(), outcome is RipOutcome.Success)
                 assertEquals(3000.0, (outcome as RipOutcome.Success).durationMs.toDouble(), 50.0)
                 assertEquals(listOf("dut", "eng"), DvdSession.probe(file).getOrThrow().audio.map { it.language })

@@ -2,7 +2,8 @@
 # Authors a small unencrypted DVD-Video image for the rip tests:
 #   title 1: two VOBs (6 s each, the second with its own clock, so the timestamps jump back at
 #            the cell boundary), chapters at 0, 3 and 6 s
-#   title 2: one 3 s VOB
+#   title 2: one 3 s VOB, interlaced: 50 pictures a second woven into 25 frames, top field first,
+#            so moving edges comb until they are deinterlaced
 # Every VOB has an AC-3 track (English) and an LPCM track (Dutch), each with its own tone per part
 # so tests can tell the parts apart. Title 1 also has two subtitle streams (Dutch, English) with
 # one subtitle per part: Dutch at 1.0-2.5 s of each part, English at 1.2-2.0 s.
@@ -19,12 +20,17 @@ keep_folder="${2:-}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-part() { # name seconds video-source tone-ac3 tone-lpcm
+part() { # name seconds video-source tone-ac3 tone-lpcm [interlaced]
+    local video="$3=size=720x576:rate=25:duration=$2" interlace=()
+    if [ "${6:-}" = interlaced ]; then
+        video="$3=size=720x576:rate=50:duration=$2,tinterlace=mode=interleave_top"
+        interlace=(-flags +ildct+ilme -top 1)
+    fi
     ffmpeg -hide_banner -loglevel error \
-        -f lavfi -i "$3=size=720x576:rate=25:duration=$2" \
+        -f lavfi -i "$video" \
         -f lavfi -i "sine=frequency=$4:sample_rate=48000:duration=$2" \
         -f lavfi -i "sine=frequency=$5:sample_rate=48000:duration=$2" \
-        -map 0:v -map 1:a -map 2:a -target pal-dvd -aspect 16:9 \
+        -map 0:v -map 1:a -map 2:a -target pal-dvd -aspect 16:9 ${interlace[@]+"${interlace[@]}"} \
         -b:v 1500k -maxrate 2500k -bufsize 1835008 \
         -c:a:0 ac3 -b:a:0 192k -ac:a:0 2 -c:a:1 pcm_dvd -ac:a:1 2 \
         "$work/$1.mpg"
@@ -32,7 +38,7 @@ part() { # name seconds video-source tone-ac3 tone-lpcm
 
 part part1 6 testsrc2 440 660
 part part2 6 smptebars 880 990
-part extra 3 rgbtestsrc 330 440
+part extra 3 testsrc2 330 440 interlaced
 
 # Subtitle images: a full-frame transparent PNG with one solid box (spumux wants at most four
 # colours), white on the left for Dutch, yellow on the right for English.

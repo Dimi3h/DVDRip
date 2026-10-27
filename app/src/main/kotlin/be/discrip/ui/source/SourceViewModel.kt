@@ -12,14 +12,18 @@ import be.discrip.core.dvd.RipPlanning
 import be.discrip.core.dvd.SubtitleTrackPlan
 import be.discrip.core.estimate.SizeEstimator
 import be.discrip.core.model.MovieMetadata
+import be.discrip.core.model.QualityPreset
 import be.discrip.core.model.StorageTarget
 import be.discrip.core.naming.RipPath
 import be.discrip.core.nas.Nas
 import be.discrip.core.nas.NasException
 import be.discrip.core.nas.NasProblem
 import be.discrip.core.settings.AppSettings
+import be.discrip.core.video.EncoderChoice
+import be.discrip.core.video.VideoPlan
 import be.discrip.data.FreeSpace
 import be.discrip.rip.DvdSource
+import be.discrip.rip.EncoderCatalog
 import be.discrip.rip.LocalOutput
 import be.discrip.rip.RipDestination
 import be.discrip.rip.RipJob
@@ -52,6 +56,10 @@ data class SourceUiState(
     val settings: AppSettings,
     /** Where this rip goes; the default from the settings until the user picks another. */
     val storage: StorageTarget,
+    /** The quality of this rip; the default from the settings until the user picks another. */
+    val preset: QualityPreset,
+    /** The device's video encoders; null while they are being read. */
+    val encoders: EncoderCatalog?,
     val folderAccess: FolderAccess,
     /** Free space in the local folder, when its storage can tell. */
     val localFreeBytes: Long?,
@@ -106,8 +114,28 @@ data class SourceUiState(
             else -> appFreeBytes
         }
 
-    val estimatedBytes: Long?
-        get() = title?.let { RipEstimate.losslessBytes(it, audio, subtitles, settings.convertLpcmToFlac) }
+    val estimatedBytes: Long? get() = estimatedBytes(preset)
+
+    /** The size of the rip with [preset] instead, for the quality picker. */
+    fun estimatedBytes(preset: QualityPreset): Long? =
+        title?.let { RipEstimate.bytes(it, preset, settings.videoBitrateKbps(preset), audio, subtitles, settings.convertLpcmToFlac) }
+
+    /**
+     * The encoders a lossy [preset] would use on this title, at the bit rate from the settings;
+     * null for the copy, while the encoders are being read, or when none fits.
+     */
+    fun videoPlan(preset: QualityPreset = this.preset): VideoPlan? {
+        val title = title ?: return null
+        val catalog = encoders ?: return null
+        val kbps = settings.videoBitrateKbps(preset) ?: return null
+        return EncoderChoice.plan(preset, kbps, catalog.forTitle(title.video.width, title.video.height))
+    }
+
+    /** A lossy [preset] that cannot be used: the device has no encoder for the title. */
+    fun unavailable(preset: QualityPreset): Boolean = preset.isLossy && encoders != null && title != null && videoPlan(preset) == null
+
+    /** The chosen quality can start: the copy always, a lossy preset once its encoder is known. */
+    val qualityReady: Boolean get() = !preset.isLossy || videoPlan() != null
 
     /** Space the rip needs before it may start: the estimate plus 10 %. */
     val neededBytes: Long? get() = estimatedBytes?.let(SizeEstimator::requiredFreeBytes)
@@ -144,19 +172,21 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
     private val selection = MutableStateFlow(TrackSelection())
     private val showAllTitles = MutableStateFlow(false)
     private val storageChoice = MutableStateFlow<StorageTarget?>(null)
+    private val presetChoice = MutableStateFlow<QualityPreset?>(null)
     private val starting = MutableStateFlow(false)
     private val space = MutableStateFlow(Space())
+    private val catalog = MutableStateFlow<EncoderCatalog?>(null)
 
     /** What [refreshFolder] found. */
     private data class Space(val access: FolderAccess = FolderAccess.NONE, val local: Long? = null, val app: Long? = null)
 
     val state: StateFlow<SourceUiState?> = combine(
-        combine(container.rips.source, container.rips.rip, ::Pair),
+        combine(container.rips.source, container.rips.rip, catalog, ::Triple),
         container.ripDraft.metadata,
         container.settingsRepository.settings,
-        combine(selection, showAllTitles, storageChoice, starting, ::Choices),
+        combine(selection, showAllTitles, storageChoice, presetChoice, starting, ::Choices),
         space,
-    ) { (source, rip), metadata, settings, choices, found ->
+    ) { (source, rip, encoders), metadata, settings, choices, found ->
         SourceUiState(
             source = if (source.sourceOrNull == dvd) source else SourceState.Opening(dvd),
             selection = choices.selection,
@@ -164,6 +194,8 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
             metadata = metadata,
             settings = settings,
             storage = choices.storage ?: settings.defaultStorage,
+            preset = choices.preset ?: settings.defaultPreset,
+            encoders = encoders,
             folderAccess = found.access,
             localFreeBytes = found.local,
             appFreeBytes = found.app,
@@ -172,10 +204,17 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    private data class Choices(val selection: TrackSelection, val showAll: Boolean, val storage: StorageTarget?, val starting: Boolean)
+    private data class Choices(
+        val selection: TrackSelection,
+        val showAll: Boolean,
+        val storage: StorageTarget?,
+        val preset: QualityPreset?,
+        val starting: Boolean,
+    )
 
     init {
         container.rips.open(dvd)
+        viewModelScope.launch { catalog.value = withContext(Dispatchers.IO) { container.encoders.catalog() } }
     }
 
     /** Choosing another title starts again from all of its streams. */
@@ -201,6 +240,11 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
     }
 
     fun retry() = container.rips.open(dvd)
+
+    /** The quality of this rip, instead of the default from the settings. */
+    fun setPreset(preset: QualityPreset) {
+        presetChoice.value = preset
+    }
 
     /** Called on every resume: the folder grant can be withdrawn and the space used while the app is away. */
     fun refreshFolder() {
@@ -232,7 +276,7 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
         if (current.needsNas) return StartCheck.NeedsNas
         val destination = current.destination ?: return StartCheck.NeedsMetadata
         if (!current.enoughSpace) return StartCheck.NotEnoughSpace
-        if (current.ripRunning || current.starting) return StartCheck.Busy
+        if (current.ripRunning || current.starting || !current.qualityReady) return StartCheck.Busy
         val job = RipJob(
             source = dvd,
             sourceName = current.ready?.name,
@@ -243,6 +287,8 @@ class SourceViewModel(private val container: AppContainer, private val dvd: DvdS
             lpcmToFlac = current.settings.convertLpcmToFlac,
             estimatedBytes = current.estimatedBytes ?: 0,
             destination = destination,
+            quality = current.preset,
+            video = current.videoPlan(),
         )
         val local = destination.local
         val localExists = local != null && withContext(Dispatchers.IO) {

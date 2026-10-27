@@ -31,6 +31,12 @@ enum class RipFailure {
 
     /** The drive keeps refusing the scrambled sectors, also after CSS authentication. */
     CSS_REFUSED,
+
+    /** No video encoder of the device would start for a lossy preset; nothing was written. */
+    ENCODER_UNAVAILABLE,
+
+    /** The video encoder failed during the rip; the half-written file was deleted. */
+    ENCODER_FAILED,
     FAILED,
 }
 
@@ -47,6 +53,10 @@ sealed interface RipOutcome {
         val subtitleTracks: Int,
         val badSectors: List<BadSectors>,
         val warnings: List<String>,
+        /** Video frames encoded by a lossy preset; 0 when the video was copied. */
+        val framesEncoded: Long = 0,
+        /** Of the frames decoded for a lossy preset, those flagged interlaced, which were deinterlaced. */
+        val interlacedFrames: Long = 0,
     ) : RipOutcome {
         val badSectorCount: Long get() = badSectors.sumOf { it.count }
     }
@@ -66,6 +76,8 @@ sealed interface RipOutcome {
             val subtitleTracks: Int = 0,
             val badSectors: List<List<Long>> = emptyList(),
             val warnings: List<String> = emptyList(),
+            val framesEncoded: Long = 0,
+            val interlacedFrames: Long = 0,
         )
 
         /** Parses the engine's report (dr_rip). */
@@ -86,6 +98,8 @@ sealed interface RipOutcome {
                     "no_video" -> RipFailure.NO_VIDEO
                     "no_space" -> RipFailure.NO_SPACE
                     "write_failed" -> RipFailure.WRITE_FAILED
+                    "encoder_unavailable" -> RipFailure.ENCODER_UNAVAILABLE
+                    "encoder_failed" -> RipFailure.ENCODER_FAILED
                     else -> RipFailure.FAILED
                 }
                 return Failure(reason, report.message.orEmpty())
@@ -98,6 +112,8 @@ sealed interface RipOutcome {
                 subtitleTracks = report.subtitleTracks,
                 badSectors = report.badSectors.filter { it.size == 2 }.map { BadSectors(it[0], it[1]) },
                 warnings = report.warnings,
+                framesEncoded = report.framesEncoded,
+                interlacedFrames = report.interlacedFrames,
             )
         }
     }
@@ -150,6 +166,8 @@ data class MkvStream(
     val language: String? = null,
     val width: Int = 0,
     val height: Int = 0,
+    /** How players show the picture, such as "16:9"; video only. */
+    val displayAspect: String? = null,
     val channels: Int = 0,
     val sampleRate: Int = 0,
 )

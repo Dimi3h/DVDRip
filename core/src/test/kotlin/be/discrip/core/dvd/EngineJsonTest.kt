@@ -68,6 +68,18 @@ class EngineJsonTest {
         assertEquals(listOf(BadSectors(100, 16), BadSectors(300, 2)), outcome.badSectors)
         assertEquals(18, outcome.badSectorCount)
         assertEquals(1, outcome.warnings.size)
+        assertEquals(0, outcome.framesEncoded)
+    }
+
+    @Test
+    fun `a lossy rip reports the frames it encoded`() {
+        val report = """{"ok":true,"outputBytes":2256344,"durationMs":3002,"chapterStartsMs":[0],"audioTracks":1,
+            "subtitleTracks":0,"badSectors":[],"warnings":[],"framesEncoded":75,"interlacedFrames":75}"""
+
+        val outcome = assertIs<RipOutcome.Success>(RipOutcome.parse(report))
+
+        assertEquals(75, outcome.framesEncoded)
+        assertEquals(75, outcome.interlacedFrames)
     }
 
     @Test
@@ -80,6 +92,8 @@ class EngineJsonTest {
             "no_video" to RipFailure.NO_VIDEO,
             "no_space" to RipFailure.NO_SPACE,
             "write_failed" to RipFailure.WRITE_FAILED,
+            "encoder_unavailable" to RipFailure.ENCODER_UNAVAILABLE,
+            "encoder_failed" to RipFailure.ENCODER_FAILED,
             "failed" to RipFailure.FAILED,
             "something_new" to RipFailure.FAILED,
         )

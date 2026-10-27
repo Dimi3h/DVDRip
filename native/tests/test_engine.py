@@ -367,6 +367,99 @@ class EngineTest(unittest.TestCase):
         report = host("rip", ISO, "9", self.output("missing.mkv"), check=False)
         self.assertEqual("no_title", report["error"])
 
+    # The lossy presets, with FFmpeg's MPEG-4 encoder standing in for MediaCodec.
+
+    def test_a_lossy_rip_reencodes_the_video_and_keeps_the_rest(self):
+        arguments = ["--audio", "0x80:eng,0xa0:dut", "--subs", "0x20:dut,0x21:eng", "--movie-title", "Testfilm"]
+        lossless = self.output("lossless.mkv")
+        kept = host("rip", ISO, "1", lossless, *arguments)
+        path = self.output("lossy.mkv")
+        report, log = run_host("rip", ISO, "1", path, *arguments, "--encoder", "mpeg4", "--bitrate", "2500000")
+        self.assertTrue(report["ok"])
+        # 12 s at 25 frames a second, none of them interlaced.
+        self.assertEqual(300, report["framesEncoded"])
+        self.assertEqual(0, report["interlacedFrames"])
+        self.assertIn("300 frames encoded", log.strip().splitlines()[-1])
+        self.assertEqual(kept["chapterStartsMs"], report["chapterStartsMs"])
+        self.assertEqual(kept["durationMs"], report["durationMs"])
+
+        # Same size, same frame rate, and the 16:9 picture still shown at 16:9 (64:45 pixels).
+        video = probe(path, "stream=codec_name,width,height,sample_aspect_ratio,display_aspect_ratio,avg_frame_rate")["streams"][0]
+        self.assertEqual({"codec_name": "mpeg4", "width": 720, "height": 576, "sample_aspect_ratio": "64:45",
+                          "display_aspect_ratio": "16:9", "avg_frame_rate": "25/1"}, video)
+        # The engine reads it back the same way, as the app checks it.
+        self.assertEqual("16:9", host("probe", path)["streams"][0]["displayAspect"])
+        self.assertEqual("16:9", host("probe", lossless)["streams"][0]["displayAspect"])
+        times = [float(p["pts_time"]) for p in probe(path, "packet=pts_time")["packets"]]
+        self.assertGreater(min(times), -0.001)
+        self.assertLess(max(times), 12.1)
+
+        # Audio and subtitles are the very packets of the lossless rip.
+        def other_streams(file):
+            return [line for line in frames(file).splitlines() if line and not line.startswith(("#", "0,"))]
+        self.assertEqual(other_streams(lossless), other_streams(path))
+        self.assertEqual(probe(lossless, "chapter=start_time,end_time:chapter_tags=title"),
+                         probe(path, "chapter=start_time,end_time:chapter_tags=title"))
+
+        decode = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", "0:v", "-map", "0:a", "-f", "null", "-"],
+                                capture_output=True, text=True)
+        self.assertEqual("", decode.stderr)
+
+    def test_the_bit_rate_steers_the_video_size(self):
+        sizes = []
+        for bit_rate in (1000000, 4000000):
+            path = self.output(f"{bit_rate}.mkv")
+            host("rip", ISO, "1", path, "--audio", "0x80", "--encoder", "mpeg4", "--bitrate", str(bit_rate))
+            size = sum(int(p["size"]) for p in probe(path, "packet=size,stream_index")["packets"] if p["stream_index"] == 0)
+            # Never much over the target; under it where the picture needs no more (still bars).
+            self.assertLess(size, bit_rate * 12 / 8 * 1.2, bit_rate)
+            sizes.append(size)
+        self.assertGreater(sizes[1], sizes[0] * 2)
+
+    def test_interlaced_frames_are_deinterlaced_and_progressive_ones_left_alone(self):
+        def detected(path):
+            """idet's verdict per frame, from the fields' likeness: (top field first, progressive)."""
+            result = subprocess.run(["ffmpeg", "-hide_banner", "-i", path, "-map", "0:v", "-vf", "idet", "-f", "null", "-"],
+                                    capture_output=True, text=True, check=True)
+            line = [l for l in result.stderr.splitlines() if "Single frame detection" in l][-1]
+            return int(re.search(r"TFF:\s*(\d+)", line).group(1)), int(re.search(r"Progressive:\s*(\d+)", line).group(1))
+
+        lossless = self.output("interlaced.mkv")
+        host("rip", ISO, "2", lossless, "--audio", "0x80")
+        tff, _ = detected(lossless)
+        self.assertGreater(tff, 70)
+
+        path = self.output("deinterlaced.mkv")
+        report = host("rip", ISO, "2", path, "--audio", "0x80", "--encoder", "mpeg4")
+        self.assertEqual(75, report["interlacedFrames"])
+        self.assertEqual(75, report["framesEncoded"])
+        tff, progressive = detected(path)
+        self.assertLess(tff, 5)
+        self.assertGreater(progressive, 70)
+        self.assertEqual("25/1", probe(path, "stream=avg_frame_rate")["streams"][0]["avg_frame_rate"])
+
+    def test_an_encoder_the_build_lacks_is_unavailable_before_anything_is_written(self):
+        path = self.output("unavailable.mkv")
+        report = host("rip", ISO, "1", path, "--audio", "0x80", "--encoder", "hevc_mediacodec", check=False)
+        self.assertEqual("encoder_unavailable", report["error"])
+        self.assertIn("hevc_mediacodec", report["message"])
+        self.assertEqual(0, os.path.getsize(path))
+
+    def test_a_lossy_rip_that_cannot_write_names_the_cause(self):
+        size = host("rip", ISO, "1", self.output("whole.mkv"), "--audio", "0x80", "--encoder", "mpeg4")["outputBytes"]
+        halfway = str(size // 2)
+        report = host("rip", ISO, "1", self.output("full.mkv"), "--audio", "0x80", "--encoder", "mpeg4",
+                      "--fail-write-at", f"{halfway}:nospace", check=False)
+        self.assertEqual("no_space", report["error"])
+        report = host("rip", ISO, "1", self.output("broken.mkv"), "--audio", "0x80", "--encoder", "mpeg4",
+                      "--fail-write-at", halfway, check=False)
+        self.assertEqual("write_failed", report["error"])
+
+    def test_a_lossy_rip_can_be_cancelled(self):
+        report = host("rip", ISO, "1", self.output("cancel.mkv"), "--audio", "0x80", "--encoder", "mpeg4",
+                      "--cancel-after", "600", check=False)
+        self.assertEqual("cancelled", report["error"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

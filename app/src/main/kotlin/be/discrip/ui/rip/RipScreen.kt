@@ -49,6 +49,7 @@ import be.discrip.ui.components.RowFrame
 import be.discrip.ui.components.ValueRow
 import be.discrip.ui.settings.currentLocale
 import be.discrip.ui.settings.nasProblemText
+import be.discrip.ui.shortLabelRes
 import be.discrip.ui.theme.HigTheme
 
 /** The running rip with its progress, then its result. */
@@ -199,10 +200,18 @@ private fun JobHeader(job: RipJob) {
 
 @Composable
 private fun RunningContent(rip: RipState.Running) {
+    val colors = HigTheme.colors
     val locale = currentLocale()
     val progress = rip.progress
     val measuring = stringResource(R.string.rip_measuring)
-    GroupedSection(header = stringResource(R.string.rip_progress_header)) {
+    // A lossy preset shows how fast it encodes, and whether that keeps up with the film.
+    val lossy = rip.job.quality.isLossy
+    val slower = lossy && progress?.slowerThanRealTime == true
+    GroupedSection(
+        header = stringResource(R.string.rip_progress_header),
+        footer = if (slower) stringResource(R.string.rip_slower_footer) else null,
+        footerColor = if (slower) colors.orange else null,
+    ) {
         row {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Text(
@@ -213,7 +222,21 @@ private fun RunningContent(rip: RipState.Running) {
                 ProgressBar(progress?.fraction ?: 0f, Modifier.padding(top = 10.dp))
             }
         }
-        row { ValueRow(stringResource(R.string.rip_speed), progress?.readBytesPerSecond?.let { Formats.speed(it, locale) } ?: measuring) }
+        if (lossy) {
+            rip.encoder?.let { encoder -> row { ValueRow(stringResource(R.string.rip_encoder), encoderName(encoder)) } }
+            row {
+                ValueRow(stringResource(R.string.rip_frame_rate), progress?.framesPerSecond?.let { Formats.framesPerSecond(it, locale) } ?: measuring)
+            }
+            row {
+                ValueRow(
+                    stringResource(R.string.rip_pace),
+                    progress?.speed?.let { Formats.pace(it, locale) } ?: measuring,
+                    valueColor = if (slower) colors.orange else colors.secondaryLabel,
+                )
+            }
+        } else {
+            row { ValueRow(stringResource(R.string.rip_speed), progress?.readBytesPerSecond?.let { Formats.speed(it, locale) } ?: measuring) }
+        }
         row { ValueRow(stringResource(R.string.rip_remaining), progress?.remainingMs?.let { Formats.duration(it / 1000) } ?: measuring) }
         row { ValueRow(stringResource(R.string.rip_written), Formats.bytes(progress?.outputBytes ?: 0, locale)) }
         row {
@@ -292,7 +315,7 @@ private fun PhaseLine(rip: RipState.Running) {
     val colors = HigTheme.colors
     val destination = rip.job.destination
     val phases = buildList {
-        add(RipStage.RIPPING to stringResource(R.string.rip_phase_read_mux))
+        add(RipStage.RIPPING to stringResource(if (rip.job.quality.isLossy) R.string.rip_phase_read_encode else R.string.rip_phase_read_mux))
         if (destination.nas != null && !destination.writesDirectly) add(RipStage.UPLOADING to stringResource(R.string.rip_phase_upload))
         if (destination.plex != null) add(RipStage.PLEX to stringResource(R.string.rip_phase_plex))
     }
@@ -321,6 +344,19 @@ private fun SucceededContent(rip: RipState.Succeeded) {
     GroupedSection(header = stringResource(R.string.rip_done_header), footer = stringResource(R.string.rip_result_footer)) {
         row { ValueRow(stringResource(R.string.rip_result_size), Formats.bytes(result.outputBytes, locale)) }
         row { ValueRow(stringResource(R.string.rip_result_duration), Formats.duration(file.durationMs / 1000)) }
+        row { ValueRow(stringResource(R.string.rip_result_quality), stringResource(rip.job.quality.shortLabelRes())) }
+        file.video.firstOrNull()?.let { video ->
+            row { ValueRow(stringResource(R.string.rip_result_video), "${videoCodecName(video.codec)} ${video.width}×${video.height}") }
+        }
+        rip.encoder?.let { encoder -> row { ValueRow(stringResource(R.string.rip_encoder), encoderName(encoder)) } }
+        if (result.interlacedFrames > 0) {
+            row {
+                ValueRow(
+                    stringResource(R.string.rip_result_deinterlaced),
+                    pluralStringResource(R.plurals.rip_frames, result.interlacedFrames.toInt(), result.interlacedFrames.toInt()),
+                )
+            }
+        }
         row { ValueRow(stringResource(R.string.rip_result_chapters), file.chapterStartsMs.size.toString()) }
         row {
             ValueRow(

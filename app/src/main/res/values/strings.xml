@@ -89,6 +89,11 @@
     <string name="quality_estimate">≈ %1$s for a 2-hour film</string>
     <string name="quality_bitrate_header">Video bitrate</string>
     <string name="quality_bitrate_footer">Starting values for the lossy presets. Higher gives a better picture and a larger file.</string>
+    <string name="quality_encoders_header">Video encoders on this device</string>
+    <string name="quality_encoders_footer">Checked for DVD size (720 × 576). Without a hardware encoder for HEVC, Balanced and Maximum compression become H.264; without any hardware encoder, DiscRip uses the slower software one.</string>
+    <string name="quality_encoder_hardware">Hardware</string>
+    <string name="quality_encoder_software">Software only</string>
+    <string name="quality_encoder_none">None</string>
     <string name="quality_reset">Restore default bitrates</string>
     <string name="quality_audio_header">Audio</string>
     <string name="quality_flac">Convert LPCM to FLAC</string>
@@ -269,7 +274,15 @@
     <string name="source_needs_folder">Choose a local folder first.</string>
     <string name="source_folder_revoked">The app can no longer write to the local folder. Choose it again.</string>
     <string name="source_quality">Quality</string>
-    <string name="source_quality_lossy_footer">Ripping with quality loss comes in a later version; this rip is lossless.</string>
+    <string name="source_quality_lossy_footer">With quality loss: the video is encoded again as %1$s, on the hardware encoder.</string>
+    <string name="source_quality_h264_footer">With quality loss. This device has no hardware encoder for HEVC, so the video becomes H.264 on the hardware encoder, at the same bit rate.</string>
+    <string name="source_quality_software_footer">With quality loss. This device has no suitable hardware encoder, so the video becomes %1$s on the software encoder. That takes longer, possibly longer than the film itself.</string>
+    <string name="source_quality_no_encoder">This device has no video encoder that can take this title. Choose Best quality.</string>
+    <string name="source_quality_sheet_footer">Sizes are for this title with the chosen tracks. The bit rates of the lossy presets are in Settings › Quality.</string>
+    <string name="source_quality_estimate">≈ %1$s</string>
+    <string name="source_quality_on_device_h264">On this device: H.264, for want of a hardware encoder for HEVC</string>
+    <string name="source_quality_on_device_software">On this device: the software encoder, slower</string>
+    <string name="source_quality_unavailable">Not available on this device</string>
     <string name="source_start">Start rip</string>
     <string name="source_choose_metadata">Choose metadata</string>
     <string name="source_exists_title">The file already exists</string>
@@ -295,6 +308,12 @@
     <string name="rip_written">Written</string>
     <string name="rip_position">Position</string>
     <string name="rip_elapsed">Elapsed</string>
+    <string name="rip_encoder">Encoder</string>
+    <string name="rip_encoder_hardware">%1$s · hardware</string>
+    <string name="rip_encoder_software">%1$s · software</string>
+    <string name="rip_frame_rate">Frames per second</string>
+    <string name="rip_pace">Pace</string>
+    <string name="rip_slower_footer">Encoding runs slower than the film plays; the time left allows for that.</string>
     <string name="rip_measuring">Measuring…</string>
     <string name="rip_keep_open_footer">Keep DiscRip open until the rip is done; the screen stays on in the meantime.</string>
     <string name="rip_cancel">Cancel rip</string>
@@ -324,6 +343,8 @@
     <string name="rip_failure_disc_changed">The disc was taken out of the drive or replaced. The unfinished file has been deleted.</string>
     <string name="rip_failure_region">The drive refuses the protected sectors of this disc because its region does not match. Set the drive on a PC to the disc\'s region (region 2 for European DVDs).</string>
     <string name="rip_failure_css_refused">The drive refuses the protected sectors, also after CSS authentication.</string>
+    <string name="rip_failure_encoder_unavailable">None of this device\'s video encoders would start, so nothing was written. Choose Best quality or another quality.</string>
+    <string name="rip_failure_encoder_failed">The video encoder failed during the rip. The half-written file was deleted. Try again, or choose Widely compatible or Best quality.</string>
     <string name="rip_next_disc_header">Next disc</string>
     <string name="rip_next_disc_insert">Insert the next disc</string>
     <string name="rip_next_disc_take_out">Take the disc out of the drive and insert the next one</string>
@@ -332,6 +353,7 @@
     <string name="notification_channel_progress">Rip progress</string>
     <string name="notification_channel_result">Finished rips</string>
     <string name="notification_reading">Reading and muxing · %1$s</string>
+    <string name="notification_encoding">Reading and encoding · %1$s</string>
     <string name="notification_left">%1$s · %2$s left</string>
     <string name="notification_retry_title">Upload to the NAS</string>
     <string name="notification_retry_upload">Uploading again · %1$s</string>
@@ -370,6 +392,13 @@
     <string name="subtitle_large">Large print</string>
     <string name="subtitle_children">For children</string>
     <string name="rip_result_subtitles">Subtitles</string>
+    <string name="rip_result_video">Video</string>
+    <string name="rip_result_quality">Quality</string>
+    <string name="rip_result_deinterlaced">Deinterlaced</string>
+    <plurals name="rip_frames">
+        <item quantity="one">%d frame</item>
+        <item quantity="other">%d frames</item>
+    </plurals>
     <string name="rip_failure_no_space_numbers">The rip needs about %1$s and %2$s is free in the local folder.</string>
     <plurals name="source_show_all_titles">
         <item quantity="one">Show the title</item>
@@ -449,6 +478,7 @@
     <string name="history_skip_upload">Don\'t Upload</string>
     <string name="plex_open">Open in Plex</string>
     <string name="rip_phase_read_mux">Reading and muxing</string>
+    <string name="rip_phase_read_encode">Reading and encoding</string>
     <string name="rip_phase_upload">Uploading</string>
     <string name="rip_phase_plex">Plex</string>
 </resources>

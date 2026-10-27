@@ -24,6 +24,12 @@ object Formats {
 
     fun speed(bytesPerSecond: Double, locale: Locale): String = decimal(bytesPerSecond / 1e6, 1, locale) + " MB/s"
 
+    /** `143 fps`; one decimal below 10. */
+    fun framesPerSecond(fps: Double, locale: Locale): String = decimal(fps, if (fps < 10) 1 else 0, locale) + " fps"
+
+    /** How fast against playing the film: `1,6×`. */
+    fun pace(speed: Double, locale: Locale): String = decimal(speed, 1, locale) + "×"
+
     /** `1:05:09` for durations of an hour or more, `45:02` below that. */
     fun duration(totalSeconds: Long): String {
         val seconds = totalSeconds.coerceAtLeast(0)

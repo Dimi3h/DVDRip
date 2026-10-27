@@ -19,7 +19,7 @@ The app is built in phases; every phase ends with a buildable app and passing te
 | 4 | Main-feature detection, audio and subtitle selection, chapters, tags, size estimates, free-space check | done |
 | 5 | SMB upload, Plex refresh and verification, "Beide" mode, history | done |
 | 6 | Real USB drive, foreground service, eject, batch flow | done |
-| 7 | Lossy presets: MediaCodec encoders, yadif, aspect ratio, H.264 fallback, LPCM to FLAC | planned |
+| 7 | Lossy presets: MediaCodec encoders, yadif, aspect ratio, H.264 fallback, LPCM to FLAC | done |
 
 ### What phase 1 contains
 
@@ -176,6 +176,26 @@ authentication, comes in phase 6 (see "CSS on real drives" below).
   tells how the rip ended. The app asks for permission to show notifications at the first rip
   (Android 13 and later); without it the work runs all the same.
 
+### What phase 7 contains
+
+- **Lossy presets**: "Gebalanceerd" (HEVC, about 2.5 Mbit/s), "Meeste compressie" (HEVC, about
+  1.2 Mbit/s) and "Breed compatibel" (H.264, about 3 Mbit/s), chosen per rip under "Kwaliteit" on
+  the source screen, each with its size for the chosen title and tracks. The default and the bit
+  rates stay in Instellingen › Kwaliteit, which also shows the phone's video encoders.
+- **The video path**: MPEG-2 decoded in software; frames flagged interlaced deinterlaced with yadif,
+  one frame out per frame in, so the frame rate stays; the pixel aspect set so the disc's 16:9 or
+  4:3 shows right (64:45 pixels for a 16:9 PAL disc), in the Matroska track and in the HEVC or H.264
+  stream itself; encoded at the title's own size by MediaCodec. Audio and subtitles are copied as
+  in the lossless preset, LPCM to PCM or, when asked, FLAC.
+- **Encoder choice**: the phone's hardware HEVC encoder; without one, H.264 on the hardware, and
+  the source screen says so; without any hardware encoder, the slower software encoder, also said.
+  An encoder that will not start makes way for the next before anything is written.
+- **Progress**: frames per second and the pace against the film (in orange below 1×, when the rip
+  takes longer than the film), the time left, and "Lezen en encoderen" in the notification.
+- **Errors**: no encoder that starts (nothing is written), an encoder that fails during the rip
+  (the unfinished file is deleted, and the screen says so).
+- **History**: every rip records its quality and, for a lossy one, the encoder.
+
 ## Building
 
 Requirements:
@@ -240,7 +260,8 @@ NAS tests are skipped; CI fails on skipped tests, so there they always run.
 The native scripts can also be used on their own: `native/scripts/make-test-dvd.sh out.iso folder`
 authors the test DVD, and `discrip_host` (in `native/build/host/` after `test-engine.sh`) lists
 titles (`discrip_host titles image.iso`), rips (`discrip_host rip image.iso 1 out.mkv --audio
-0x80:eng`) and reads a Matroska file back (`discrip_host probe out.mkv`).
+0x80:eng`, with `--encoder mpeg4 --bitrate 2500000` the way the lossy presets do, MPEG-4 Part 2
+standing in for MediaCodec) and reads a Matroska file back (`discrip_host probe out.mkv`).
 
 Release builds are minified with R8. Put a `keystore.properties` (git-ignored) next to this README
 to sign them with your own key:
@@ -267,8 +288,9 @@ preinstalled NDK and CMake match): core tests, and the NAS client against a Samb
 runner; the rip engine tests on the runner (`native/scripts/test-engine.sh`); app unit tests, the
 debug and release APKs (the debug one is uploaded as the `discrip-debug-apk` artifact), lint and
 the 16 KB alignment check; instrumented tests on an API 30 x86_64 emulator, whose ARM translation
-runs the arm64-only app, including the end-to-end rips of the test DVD to a local folder and to
-the runner's Samba server; and a report of which pinned dependencies have newer stable releases
+runs the arm64-only app, including the end-to-end rips of the test DVD to a local folder (lossless
+and "Gebalanceerd", whose file ffprobe then checks: `scripts/check_lossy_output.py`) and to the
+runner's Samba server; and a report of which pinned dependencies have newer stable releases
 (`python3 scripts/dependency_report.py` does the same locally). The third-party sources and the
 FFmpeg builds are cached between runs. The emulator needs 7.4 GB free next to the build, so the
 job first removes toolchains it does not use (.NET, GHC, CodeQL, Swift).
@@ -307,6 +329,7 @@ core/                     Platform-independent Kotlin (separate Gradle build, Ma
   disc/                   Block devices (drive, ISO file), ISO 9660/UDF reader, disc probe,
                           monitor, DriveReader (how the rip engine reads a drive)
   dvd/                    Title list and rip report models, ISO 639 codes, track order, progress
+  video/                  Which encoder a lossy preset uses (EncoderChoice)
   src/testFixtures/.../testing/  Simulated USB drive and CSS scrambler, also for the app's tests
   src/test/.../testing/   Disc images for the tests
   src/test/resources/     Disc image fixtures (and the script that makes them), CSS vectors
@@ -315,10 +338,12 @@ app/                      Android app
   usb/                    libusb and Java USB transports, mass-storage interface lookup
   drive/                  DriveManager: discovery, permission, claim, polling, lending the disc
   rip/                    RipManager (rip, upload, Plex), DVD sessions over JNI, SAF folder
-                          reader, outputs (local folder, app storage, NAS), destinations
+                          reader, outputs (local folder, app storage, NAS), destinations, the
+                          device's video encoders (DeviceEncoders)
   work/                   The foreground service and its notifications
   src/main/cpp/           CMake build of libusb, libdvdcss, libdvdread and the engine
-    engine/               The rip engine in C: sources, title plans, VOBU reader, remux to MKV
+    engine/               The rip engine in C: sources, title plans, VOBU reader, remux to MKV,
+                          and the lossy presets' video (dr_video: decode, yadif, aspect, encode)
     jni/, usb_jni.c       JNI bridges for the engine and for libusb
     host/                 discrip_host, the engine's command-line driver for the build machine,
                           and css_tool (CSS test vectors and scrambled copies from libdvdcss)
@@ -329,7 +354,7 @@ native/scripts/           fetch-sources.sh (pinned, checksummed sources), build-
                           make-test-dvd.sh, test-engine.sh
 native/tests/             test_engine.py: engine tests against the authored test DVD
 scripts/                  dependency_report.py, check_native_alignment.py, test_summary.py,
-                          samba-test-server.sh
+                          samba-test-server.sh, check_lossy_output.py
 ```
 
 ## Decisions
@@ -427,8 +452,10 @@ These were made without asking because they do not change the architecture; each
     cannot rename gets the final name directly.
 19. **FFmpeg build.** FFmpeg 9.0.2, configured as LGPL (no `--enable-gpl`, no `--enable-nonfree`)
     with only the demuxers, muxer, decoders, encoders, parsers and filters DiscRip uses (see
-    `native/scripts/build-ffmpeg.sh`), as shared libraries with unversioned names. The MediaCodec
-    encoders and the filters for the lossy presets are already in the build for phase 7.
+    `native/scripts/build-ffmpeg.sh`), as shared libraries with unversioned names: for the lossy
+    presets the MediaCodec encoders, the yadif, scale, setsar and format filters, and the
+    `h264_metadata` and `hevc_metadata` bitstream filters (decision 42). The build machine's static
+    FFmpeg adds the MPEG-4 Part 2 encoder for the engine tests.
 20. **Licenses.** libdvdcss and libdvdread are GPL-2.0-or-later and are linked statically into
     `libdiscrip.so`, so that library, and with it the app, falls under the GPL. That is fine for a
     personal app that is not distributed; anyone who passes the APK on must offer this source
@@ -520,6 +547,42 @@ These were made without asking because they do not change the architecture; each
     starten" is first tapped, when the reason is clear; the rip starts whatever the answer.
 40. **Drive tests without a drive.** core's simulated drive (Bulk-Only Transport, SCSI, CSS
     authentication, region, faults) is a test fixture that the instrumented tests use too.
+41. **The lossy video path** (`engine/dr_video.c`). FFmpeg decodes the MPEG-2 video in software
+    (slice threads). A filter graph, built for the frames as they come and rebuilt when their size,
+    format or colours change, runs `yadif=mode=send_frame:parity=auto:deint=interlaced` (only
+    frames flagged interlaced, one frame out per frame in), `scale` to the title's size (nothing
+    for frames of that size; titles that change size halfway are rare), `setsar` and `format`
+    (NV12, else planar 4:2:0, whichever the encoder starts with). The pixel aspect follows from the
+    IFO's display aspect and the full frame, as FFmpeg's MPEG-2 decoder and the lossless copy have
+    it: 64:45 for 720×576 at 16:9, 16:15 at 4:3, 32:27 and 8:9 for NTSC. Frame times stay as on the
+    disc, so soft-telecined film keeps its 24 frames a second.
+42. **The aspect ratio in the stream as well.** MediaCodec has no portable way to put the pixel
+    aspect into the SPS, and a player that ignores Matroska's display size (or a Plex remux to
+    MPEG-TS for a TV) would show a 16:9 disc squeezed. FFmpeg's `hevc_metadata` and `h264_metadata`
+    bitstream filters therefore write it into the parameter sets, in the CodecPrivate and in the
+    stream; Matroska's display size carries it too. CI takes the emulator's stream out of Matroska
+    and checks it with ffprobe.
+43. **One encoder tick per frame**, as ffmpeg sets it. FFmpeg's own encoders (the MPEG-4 stand-in
+    on the build machine) count frames in the time base to spread the bit rate; in milliseconds they
+    missed the target completely. MediaCodec only converts it to microseconds.
+44. **Which encoder.** From MediaCodecList (regular codecs, no aliases): encoders that take the
+    title's size from buffers (NV12, planar or flexible 4:2:0). For the HEVC presets: hardware HEVC,
+    then hardware H.264, then software HEVC, then software H.264; for "Breed compatibel" hardware,
+    then software H.264. The preset's bit rate stays on a fallback, so the file comes out at the size
+    shown; H.264 at HEVC's rate looks somewhat worse, and the screen says H.264 is used. VBR where
+    the encoder can, else CBR, else its own mode. FFmpeg drives MediaCodec through the NDK (it gets
+    no JVM) and opens the component by name (`codec_name`).
+45. **Encoder failures.** An encoder that will not open fails the engine before it writes, and the
+    next one takes over, in the same file. One that fails during the rip ends it; the unfinished
+    file is deleted and the message says so. Starting over with another encoder by itself would
+    double the time of a long rip, so that is left to the user ("Breed compatibel" or "Beste
+    kwaliteit").
+46. **Testing without MediaCodec.** The build machine has no MediaCodec, so its FFmpeg adds the
+    MPEG-4 Part 2 encoder and the engine tests run the whole lossy path with it: yadif checked with
+    FFmpeg's `idet` on an interlaced title of the test DVD, the bit rate, the 16:9 aspect, audio and
+    subtitles packet for packet as in the lossless rip, write failures, cancelling, a missing
+    encoder. The emulator rips "Gebalanceerd" through the app with its own (software) encoders,
+    also with an encoder that will not start, and leaves the file for CI's ffprobe check.
 
 ## CSS on real drives (phase 6)
 
@@ -651,6 +714,22 @@ Phase 6 with the drive:
    drive refuses the disc and how to set the region on a PC.
 8. A scratched disc: the rip goes on past unreadable sectors and the result lists them; on a disc
    where the CSS key search runs into a scratch, the search starts again past it.
+
+Phase 7 on a phone:
+
+1. Instellingen › Kwaliteit, "Video-encoders op dit toestel": HEVC and H.264 should say "Hardware"
+   with a component such as `c2.qti.hevc.encoder` or `c2.exynos.hevc.encoder`.
+2. Open a disc or an image, tap "Kwaliteit" and choose "Gebalanceerd": the sizes in the list follow
+   the title and the tracks, and the footer says the video becomes HEVC on the hardware encoder.
+3. Rip: "Lezen en encoderen", frames per second and the pace; on a recent phone the pace should be
+   well above 1×. Turn the screen off; the notification keeps counting.
+4. Play the MKV in Plex (also in a TV app) and in VLC: a 16:9 disc fills the width without being
+   squeezed, a 4:3 disc stays 4:3, an interlaced disc (TV series, concerts) shows no combing on
+   moving edges, and chapters and audio tracks are as in a lossless rip.
+5. Sizes: a two-hour film should come to about 2 to 3 GB with "Gebalanceerd" and about 1 GB with
+   "Meeste compressie".
+6. On a phone without a hardware HEVC encoder (older or budget models) the source screen says the
+   rip uses H.264.
 
 ## Privacy
 

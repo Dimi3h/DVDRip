@@ -3,6 +3,7 @@
 #include "dr_json.h"
 #include "dr_plan.h"
 #include "dr_reader.h"
+#include "dr_video.h"
 
 #include <errno.h>
 #include <libavcodec/avcodec.h>
@@ -68,6 +69,9 @@ typedef struct rip {
     AVStream *video_out;
     int64_t video_last_dts;
     int64_t video_end;
+    /* The lossy presets re-encode the video; NULL copies it. */
+    dr_video *video;
+    AVRational video_time_base; /* the encoder's */
 
     audio_track tracks[MAX_TRACKS];
     int track_count;
@@ -174,6 +178,7 @@ static void report_progress(rip *r, int force) {
         .sectors_total = r->plan.sector_count,
         .output_bytes = r->out != NULL && r->out->pb != NULL ? avio_tell(r->out->pb) : 0,
         .position_ms = r->video_end > 0 ? r->video_end / 90 : 0,
+        .frames_encoded = dr_video_frames_encoded(r->video),
     };
     r->hooks->progress(r->hooks->opaque, &progress);
 }
@@ -649,6 +654,10 @@ static char *success(rip *r) {
     dr_json_begin_array(&json);
     for (int i = 0; i < r->warning_count; i++) dr_json_string(&json, r->warnings[i]);
     dr_json_end_array(&json);
+    if (r->video != NULL) {
+        dr_json_key(&json, "framesEncoded"); dr_json_int(&json, dr_video_frames_encoded(r->video));
+        dr_json_key(&json, "interlacedFrames"); dr_json_int(&json, dr_video_interlaced_frames(r->video));
+    }
     dr_json_end_object(&json);
     return dr_json_take(&json);
 }
@@ -705,12 +714,18 @@ static int open_output(rip *r) {
     const AVStream *video = r->in->streams[r->video_in];
     r->video_out = avformat_new_stream(r->out, NULL);
     if (r->video_out == NULL) return AVERROR(ENOMEM);
-    result = avcodec_parameters_copy(r->video_out->codecpar, video->codecpar);
-    if (result < 0) return result;
-    r->video_out->codecpar->codec_tag = 0;
-    r->video_out->time_base = video->time_base;
-    r->video_out->sample_aspect_ratio = video->codecpar->sample_aspect_ratio;
-    r->video_out->avg_frame_rate = video->avg_frame_rate;
+    if (r->video != NULL) {
+        result = dr_video_describe(r->video, r->video_out);
+        if (result < 0) return result;
+        r->video_time_base = r->video_out->time_base;
+    } else {
+        result = avcodec_parameters_copy(r->video_out->codecpar, video->codecpar);
+        if (result < 0) return result;
+        r->video_out->codecpar->codec_tag = 0;
+        r->video_out->time_base = video->time_base;
+        r->video_out->sample_aspect_ratio = video->codecpar->sample_aspect_ratio;
+        r->video_out->avg_frame_rate = video->avg_frame_rate;
+    }
     r->video_out->disposition = AV_DISPOSITION_DEFAULT;
     r->video_last_dts = AV_NOPTS_VALUE;
 
@@ -750,6 +765,7 @@ static void close_rip(rip *r) {
     }
     av_packet_free(&r->packet);
     av_packet_free(&r->encoded);
+    dr_video_close(r->video);
     dr_reader_close(r->reader);
     dr_plan_free(&r->plan);
 }
@@ -758,6 +774,34 @@ static void close_rip(rip *r) {
 static char *write_failure(const rip *r) {
     int code = r->write_errno;
     return failure(code == ENOSPC || code == EDQUOT ? "no_space" : "write_failed", strerror(code));
+}
+
+/* A packet of the re-encoded video: into the output's time base and on to the muxer. */
+static int emit_video(void *opaque, AVPacket *packet) {
+    rip *r = opaque;
+    av_packet_rescale_ts(packet, r->video_time_base, r->video_out->time_base);
+    packet->stream_index = r->video_out->index;
+    if (packet->pts != AV_NOPTS_VALUE) {
+        int64_t end = av_rescale_q(packet->pts + packet->duration, r->video_out->time_base, MPEG_TIME_BASE);
+        if (end > r->video_end) r->video_end = end;
+    }
+    return write_packet(r, packet, &r->video_last_dts);
+}
+
+/* A packet of the video to re-encode, put on the output's timeline like the copied streams. */
+static int transcode_video(rip *r, AVPacket *packet, const AVStream *in) {
+    int64_t offset = av_rescale_q(offset_for(r, packet->pos, &r->video_last_offset), MPEG_TIME_BASE, in->time_base);
+    if (packet->pts != AV_NOPTS_VALUE) packet->pts += offset;
+    if (packet->dts != AV_NOPTS_VALUE) packet->dts += offset;
+    return dr_video_send(r->video, packet, emit_video, r);
+}
+
+/* The encoder failed, or the muxer under it. */
+static char *video_failure(rip *r, int result) {
+    if (r->write_errno != 0) return write_failure(r);
+    char message[200];
+    snprintf(message, sizeof(message), "The video encoder failed: %s", av_err2str(result));
+    return failure("encoder_failed", message);
 }
 
 static char *read_failure(rip *r, int result) {
@@ -856,6 +900,23 @@ char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hoo
         if (!kept) r->in->streams[i]->discard = AVDISCARD_ALL;
     }
 
+    if (options->video_encoder != NULL && options->video_encoder[0]) {
+        /* The IFO's display aspect is the one the disc means: 0 is 4:3, 3 is 16:9. */
+        int aspect = r->plan.vts->vtsi_mat->vts_video_attr.display_aspect_ratio;
+        dr_video_config config = {
+            .encoder = options->video_encoder,
+            .component = options->video_component,
+            .bit_rate = options->video_bit_rate,
+            .bitrate_mode = options->video_bitrate_mode,
+            .display_aspect = aspect == 3 ? (AVRational) {16, 9} : aspect == 0 ? (AVRational) {4, 3} : (AVRational) {0, 0},
+        };
+        result = dr_video_open(&r->video, r->in->streams[r->video_in], &config, 1, &r->logger, error, sizeof(error));
+        if (result < 0) {
+            report = failure("encoder_unavailable", error);
+            goto done;
+        }
+    }
+
     result = open_output(r);
     if (result < 0) {
         snprintf(error, sizeof(error), "Preparing the Matroska file failed: %s", av_err2str(result));
@@ -885,7 +946,14 @@ char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hoo
         int index = r->packet->stream_index;
         const AVStream *in = r->in->streams[index];
         subtitle_track *subtitle = subtitle_for_stream(r, index);
-        if (index == r->video_in) {
+        if (index == r->video_in && r->video != NULL) {
+            result = transcode_video(r, r->packet, in);
+            if (result < 0) {
+                av_packet_unref(r->packet);
+                report = video_failure(r, result);
+                goto done;
+            }
+        } else if (index == r->video_in) {
             result = copy_packet(r, r->packet, in, r->video_out, &r->video_last_offset, &r->video_last_dts, 1);
         } else if (subtitle != NULL) {
             result = copy_subtitle_packet(r, r->packet, in, subtitle);
@@ -910,6 +978,13 @@ char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hoo
         report_progress(r, 0);
     }
 
+    if (r->video != NULL) {
+        result = dr_video_flush(r->video, emit_video, r);
+        if (result < 0) {
+            report = video_failure(r, result);
+            goto done;
+        }
+    }
     for (int i = 0; i < r->subtitle_count; i++) {
         /* Normal on discs that carry a stream for a few lines only, so a note rather than a warning. */
         if (r->subtitles[i].in_index < 0) {

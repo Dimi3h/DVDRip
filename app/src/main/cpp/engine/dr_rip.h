@@ -1,8 +1,9 @@
 /*
  * Rips one title into Matroska: the VOBU reader feeds FFmpeg's MPEG-PS demuxer through a custom
- * AVIOContext, video, compressed audio and subpictures are copied, LPCM is re-encoded losslessly
- * (PCM, or FLAC when asked), timestamps are lined up across VOB boundaries, chapters come from
- * the cells where programs start, and the file is written through the caller's dr_file.
+ * AVIOContext, compressed audio and subpictures are copied, the video is copied or re-encoded
+ * (dr_video.h), LPCM is re-encoded losslessly (PCM, or FLAC when asked), timestamps are lined up
+ * across VOB boundaries, chapters come from the cells where programs start, and the file is
+ * written through the caller's dr_file.
  */
 #ifndef DR_RIP_H
 #define DR_RIP_H
@@ -66,6 +67,15 @@ typedef struct dr_rip_options {
     int chapter_name_count;
     /* Where the file goes, written from position 0; stays the caller's. */
     dr_file output;
+    /* The lossy presets: an FFmpeg video encoder ("hevc_mediacodec", "h264_mediacodec"), or NULL
+       to copy the MPEG-2 video as it is. */
+    const char *video_encoder;
+    /* For MediaCodec: the component to encode with, or NULL for the first of its type. */
+    const char *video_component;
+    /* Target video bit rate in bit/s. */
+    int64_t video_bit_rate;
+    /* MediaCodec's bit rate mode, "vbr" or "cbr" (what the component supports), or NULL for its default. */
+    const char *video_bitrate_mode;
 } dr_rip_options;
 
 typedef struct dr_progress {
@@ -73,6 +83,8 @@ typedef struct dr_progress {
     uint64_t sectors_total;
     int64_t output_bytes;
     int64_t position_ms;
+    /* Video frames encoded so far; 0 when the video is copied. */
+    int64_t frames_encoded;
 } dr_progress;
 
 typedef struct dr_rip_hooks {
@@ -85,7 +97,9 @@ typedef struct dr_rip_hooks {
  * Rips and returns a JSON report (caller frees):
  *   {"ok":true,"outputBytes":…,"durationMs":…,"chapterStartsMs":[…],"badSectors":[[first,count],…],
  *    "audioTracks":…,"subtitleTracks":…,"warnings":[…]}
- *   {"ok":false,"error":"cancelled|no_title|unreadable|scrambled|no_video|no_space|write_failed|failed","message":"…"}
+ *    and, with video_encoder, "framesEncoded":…,"interlacedFrames":…
+ *   {"ok":false,"error":"cancelled|no_title|unreadable|scrambled|no_video|encoder_unavailable|encoder_failed|
+ *                       no_space|write_failed|failed","message":"…"}
  */
 char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hooks, const dr_logger *logger);
 

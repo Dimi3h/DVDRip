@@ -170,6 +170,10 @@ jobs:
       - name: Instrumented test results
         if: always()
         run: python3 scripts/test_summary.py --no-skipped app/build/outputs/androidTest-results/connected
+      # LossyEndToEndTest leaves its "Gebalanceerd" rip behind for a second opinion from the full
+      # FFmpeg installed above: codec, size, frames, and the aspect ratio in the stream itself.
+      - name: Check the lossy rip with ffprobe
+        run: python3 scripts/check_lossy_output.py app/build/outputs/connected_android_test_additional_output
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -178,6 +182,7 @@ jobs:
           path: |
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
+            app/build/outputs/connected_android_test_additional_output/
 
   dependencies:
     name: Dependency report

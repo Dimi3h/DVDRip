@@ -9,7 +9,9 @@ import be.discrip.core.dvd.DvdAudioStream
 import be.discrip.core.dvd.DvdSubtitleStream
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.format.Formats
+import be.discrip.core.model.VideoCodec
 import be.discrip.core.plex.PlexResult
+import be.discrip.core.video.VideoEncoding
 import be.discrip.rip.NasOutcome
 import be.discrip.rip.RipLabels
 import be.discrip.rip.RipStage
@@ -118,8 +120,31 @@ fun failureTextRes(reason: RipFailure): Int = when (reason) {
     RipFailure.DISC_CHANGED -> R.string.rip_failure_disc_changed
     RipFailure.REGION_MISMATCH -> R.string.rip_failure_region
     RipFailure.CSS_REFUSED -> R.string.rip_failure_css_refused
+    RipFailure.ENCODER_UNAVAILABLE -> R.string.rip_failure_encoder_unavailable
+    RipFailure.ENCODER_FAILED -> R.string.rip_failure_encoder_failed
     RipFailure.FAILED -> R.string.rip_failure_failed
 }
+
+/** "HEVC", "H.264", "MPEG-2": names everyone uses, in every language. */
+fun videoCodecName(codec: VideoCodec): String = when (codec) {
+    VideoCodec.HEVC -> "HEVC"
+    VideoCodec.H264 -> "H.264"
+    VideoCodec.COPY -> "MPEG-2"
+}
+
+/** The same for a codec as FFmpeg names it in a finished file ("hevc", "h264", "mpeg2video"). */
+fun videoCodecName(ffmpegName: String?): String = when (ffmpegName) {
+    "hevc" -> "HEVC"
+    "h264" -> "H.264"
+    "mpeg2video" -> "MPEG-2"
+    "mpeg1video" -> "MPEG-1"
+    else -> ffmpegName.orEmpty()
+}
+
+/** "HEVC · hardware", "H.264 · software". */
+@Composable
+fun encoderName(encoding: VideoEncoding): String =
+    stringResource(if (encoding.hardware) R.string.rip_encoder_hardware else R.string.rip_encoder_software, videoCodecName(encoding.codec))
 
 /** What the user reads when telling Plex about a rip did not work out. */
 fun plexResultText(result: PlexResult): Int = when (result) {

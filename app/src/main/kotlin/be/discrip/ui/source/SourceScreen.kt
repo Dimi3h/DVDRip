@@ -31,6 +31,7 @@ import be.discrip.core.dvd.RipPlanning
 import be.discrip.core.format.Formats
 import be.discrip.core.model.QualityPreset
 import be.discrip.core.model.StorageTarget
+import be.discrip.core.video.EncoderFallback
 import be.discrip.rip.DvdSource
 import be.discrip.rip.RipJob
 import be.discrip.rip.SourceProblem
@@ -55,6 +56,7 @@ import be.discrip.ui.rip.audioFormat
 import be.discrip.ui.rip.audioTitle
 import be.discrip.ui.rip.subtitleKind
 import be.discrip.ui.rip.subtitleTitle
+import be.discrip.ui.rip.videoCodecName
 import be.discrip.ui.settings.FolderAccess
 import be.discrip.ui.settings.currentLocale
 import be.discrip.ui.settings.nasProblemText
@@ -82,6 +84,7 @@ fun SourceScreen(
     var nasTrouble by remember { mutableStateOf<StartCheck?>(null) }
     var choosingDefault by remember { mutableStateOf(false) }
     var choosingStorage by remember { mutableStateOf(false) }
+    var choosingQuality by remember { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
         viewModel.refreshFolder()
@@ -150,6 +153,7 @@ fun SourceScreen(
                 onOpenNasSettings = onOpenNasSettings,
                 onChooseDefault = { choosingDefault = true },
                 onChooseStorage = { choosingStorage = true },
+                onChooseQuality = { choosingQuality = true },
                 start = start,
             )
         }
@@ -160,6 +164,9 @@ fun SourceScreen(
     }
     if (choosingStorage && current != null) {
         StorageSheet(current, viewModel, onClose = { choosingStorage = false })
+    }
+    if (choosingQuality && current != null) {
+        QualitySheet(current, viewModel, onClose = { choosingQuality = false })
     }
 
     nasTrouble?.let { trouble ->
@@ -215,6 +222,7 @@ private fun ReadyContent(
     onOpenNasSettings: () -> Unit,
     onChooseDefault: () -> Unit,
     onChooseStorage: () -> Unit,
+    onChooseQuality: () -> Unit,
     start: () -> Unit,
 ) {
     val colors = HigTheme.colors
@@ -238,19 +246,15 @@ private fun ReadyContent(
         SubtitlesSection(state, chosen, viewModel)
     }
 
-    OutputSection(state, onChooseStorage, onOpenStorageSettings, onOpenNasSettings)
+    QualitySection(state, onChooseQuality)
 
-    GroupedSection(
-        footer = if (state.settings.defaultPreset.isLossy) stringResource(R.string.source_quality_lossy_footer) else null,
-    ) {
-        row { ValueRow(stringResource(R.string.source_quality), stringResource(QualityPreset.LOSSLESS.shortLabelRes())) }
-    }
+    OutputSection(state, onChooseStorage, onOpenStorageSettings, onOpenNasSettings)
 
     FilledButton(
         text = stringResource(if (metadata == null) R.string.source_choose_metadata else R.string.source_start),
         onClick = start,
         enabled = chosen != null && !state.ripRunning &&
-            (metadata == null || (!state.needsFolder && !state.needsNas && state.enoughSpace)),
+            (metadata == null || (!state.needsFolder && !state.needsNas && state.enoughSpace && state.qualityReady)),
         loading = state.starting,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 32.dp),
     )
@@ -409,6 +413,72 @@ private fun OutputSection(
             row { NavigationRow(stringResource(R.string.action_open_settings), onClick = onOpenStorageSettings) }
         } else if (state.needsNas) {
             row { NavigationRow(stringResource(R.string.source_nas_open_settings), onClick = onOpenNasSettings) }
+        }
+    }
+}
+
+/** The quality of this rip, and for a lossy one the encoder that will do it. */
+@Composable
+private fun QualitySection(state: SourceUiState, onChooseQuality: () -> Unit) {
+    val preset = state.preset
+    val plan = state.videoPlan()
+    val unavailable = state.unavailable(preset)
+    val footer = when {
+        !preset.isLossy || state.encoders == null -> null
+        plan == null -> if (unavailable) stringResource(R.string.source_quality_no_encoder) else null
+        else -> when (plan.fallbackOf()) {
+            EncoderFallback.NONE -> stringResource(R.string.source_quality_lossy_footer, videoCodecName(plan.encoder.codec))
+            EncoderFallback.H264_INSTEAD_OF_HEVC -> stringResource(R.string.source_quality_h264_footer)
+            EncoderFallback.SOFTWARE -> stringResource(R.string.source_quality_software_footer, videoCodecName(plan.encoder.codec))
+        }
+    }
+    GroupedSection(footer = footer, footerColor = if (unavailable) HigTheme.colors.orange else null) {
+        row {
+            NavigationRow(
+                title = stringResource(R.string.source_quality),
+                value = stringResource(preset.shortLabelRes()),
+                onClick = onChooseQuality,
+            )
+        }
+    }
+}
+
+/** The four presets with what each would give for this title on this device. */
+@Composable
+private fun QualitySheet(state: SourceUiState, viewModel: SourceViewModel, onClose: () -> Unit) {
+    val locale = currentLocale()
+    HigSheet(
+        title = stringResource(R.string.source_quality),
+        onDismissRequest = onClose,
+        doneLabel = stringResource(R.string.action_done),
+        onDone = onClose,
+    ) {
+        GroupedSection(footer = stringResource(R.string.source_quality_sheet_footer)) {
+            for (preset in QualityPreset.entries) {
+                row {
+                    val unavailable = state.unavailable(preset)
+                    val device = when {
+                        unavailable -> stringResource(R.string.source_quality_unavailable)
+                        !preset.isLossy -> null
+                        else -> when (state.videoPlan(preset)?.fallbackOf()) {
+                            EncoderFallback.H264_INSTEAD_OF_HEVC -> stringResource(R.string.source_quality_on_device_h264)
+                            EncoderFallback.SOFTWARE -> stringResource(R.string.source_quality_on_device_software)
+                            EncoderFallback.NONE, null -> null
+                        }
+                    }
+                    val estimate = state.estimatedBytes(preset)?.let { stringResource(R.string.source_quality_estimate, Formats.bytes(it, locale)) }
+                    CheckRow(
+                        title = stringResource(preset.labelRes()),
+                        subtitle = listOfNotNull(stringResource(preset.descriptionRes()), estimate, device).joinToString("\n"),
+                        checked = state.preset == preset,
+                        enabled = !unavailable,
+                        onClick = {
+                            viewModel.setPreset(preset)
+                            onClose()
+                        },
+                    )
+                }
+            }
         }
     }
 }

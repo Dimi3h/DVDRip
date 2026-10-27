@@ -2,8 +2,10 @@ package be.discrip.core.dvd
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ProgressTrackerTest {
 
@@ -48,6 +50,33 @@ class ProgressTrackerTest {
 
         // The window now only covers the slow part: about 100 sectors a second.
         assertEquals(100 * 2048.0, assertNotNull(progress.readBytesPerSecond), 100 * 2048.0 * 0.15)
+    }
+
+    @Test
+    fun `a lossy rip shows how fast it encodes and whether it keeps up with the film`() {
+        tracker.update(0, 10_000, 0, 0, 0)
+        now += 4_000
+        // 2 s of film at 25 frames a second in 4 s: half as fast as the film plays.
+        val slow = tracker.update(500, 10_000, 1_000_000, 2_000, 50)
+
+        assertEquals(12.5, assertNotNull(slow.framesPerSecond), 0.001)
+        assertEquals(0.5, assertNotNull(slow.speed), 0.001)
+        assertEquals(50, slow.framesEncoded)
+        assertTrue(slow.slowerThanRealTime)
+
+        now += 2_000
+        val faster = tracker.update(1_500, 10_000, 3_000_000, 10_000, 250)
+        assertFalse(faster.slowerThanRealTime)
+    }
+
+    @Test
+    fun `a copy encodes nothing and has no frame rate`() {
+        tracker.update(0, 10_000, 0, 0)
+        now += 2_000
+        val progress = tracker.update(1_000, 10_000, 2_000_000, 40_000)
+
+        assertNull(progress.framesPerSecond)
+        assertEquals(20.0, assertNotNull(progress.speed), 0.001)
     }
 
     @Test

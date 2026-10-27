@@ -25,6 +25,8 @@ import be.discrip.core.dvd.RipFailure
 import be.discrip.core.format.Formats
 import be.discrip.core.history.RipRecord
 import be.discrip.core.history.RipResult
+import be.discrip.core.model.QualityPreset
+import be.discrip.core.model.VideoCodec
 import be.discrip.core.plex.PlexResult
 import be.discrip.rip.Retry
 import be.discrip.rip.RipStage
@@ -42,8 +44,10 @@ import be.discrip.ui.labelRes
 import be.discrip.ui.rip.failureText
 import be.discrip.ui.rip.percent
 import be.discrip.ui.rip.plexResultText
+import be.discrip.ui.rip.videoCodecName
 import be.discrip.ui.settings.currentLocale
 import be.discrip.ui.settings.nasProblemText
+import be.discrip.ui.shortLabelRes
 import be.discrip.ui.theme.HigTheme
 import java.text.DateFormat
 import java.util.Date
@@ -111,6 +115,20 @@ private fun RecordSheet(container: AppContainer, record: RipRecord, retry: Retry
                 )
             }
             row { ValueRow(stringResource(R.string.source_storage), stringResource(record.storage.labelRes())) }
+            // Records from before the lossy presets have none: those rips were all lossless.
+            row { ValueRow(stringResource(R.string.rip_result_quality), stringResource((record.preset ?: QualityPreset.LOSSLESS).shortLabelRes())) }
+            val codec = record.videoCodec
+            if (codec != null && codec != VideoCodec.COPY) {
+                row {
+                    ValueRow(
+                        stringResource(R.string.rip_encoder),
+                        stringResource(
+                            if (record.videoHardware == false) R.string.rip_encoder_software else R.string.rip_encoder_hardware,
+                            videoCodecName(codec),
+                        ),
+                    )
+                }
+            }
             if (record.result == RipResult.SUCCEEDED) {
                 row { ValueRow(stringResource(R.string.rip_result_size), Formats.bytes(record.bytes, locale)) }
                 row { ValueRow(stringResource(R.string.rip_result_duration), Formats.duration(record.durationMs / 1000)) }

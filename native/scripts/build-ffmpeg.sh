@@ -19,7 +19,8 @@ android_api=29
 
 # DVD-Video in, Matroska out. The lossless path copies MPEG-2, AC-3, DTS and MPEG audio and
 # re-encodes LPCM to PCM or FLAC; the lossy presets decode MPEG-2, filter (deinterlace, scale,
-# aspect ratio) and encode with MediaCodec. LGPL: no --enable-gpl, no --enable-nonfree.
+# aspect ratio) and encode with MediaCodec, whose H.264 and HEVC get the aspect ratio written into
+# their parameter sets by the metadata bitstream filters. LGPL: no --enable-gpl, no --enable-nonfree.
 components=(
     --disable-everything
     --disable-autodetect
@@ -36,7 +37,7 @@ components=(
     --enable-parser=mpegvideo,ac3,dca,mpegaudio,dvdsub,dvd_nav
     --enable-filter=buffer,buffersink,yadif,bwdif,scale,format,setsar,null
     --enable-protocol=file,fd
-    --enable-bsf=extract_extradata
+    --enable-bsf=extract_extradata,h264_metadata,hevc_metadata
 )
 
 sha256() {
@@ -84,6 +85,9 @@ case "$target" in
             --disable-shared
             --enable-static
             --enable-pic
+            # The build machine has no MediaCodec: the host tests run the lossy path with FFmpeg's
+            # own MPEG-4 Part 2 encoder in its place.
+            --enable-encoder=mpeg4
         )
         ;;
     *)

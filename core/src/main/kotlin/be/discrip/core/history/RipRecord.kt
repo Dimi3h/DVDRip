@@ -1,7 +1,9 @@
 package be.discrip.core.history
 
 import be.discrip.core.dvd.RipFailure
+import be.discrip.core.model.QualityPreset
 import be.discrip.core.model.StorageTarget
+import be.discrip.core.model.VideoCodec
 import be.discrip.core.nas.NasProblem
 import be.discrip.core.plex.PlexResult
 import kotlinx.serialization.Serializable
@@ -27,6 +29,14 @@ data class RipRecord(
     val sourceName: String? = null,
     val titleNumber: Int = 0,
     val storage: StorageTarget = StorageTarget.LOCAL,
+    /** Null in records from before the lossy presets, which were all lossless. */
+    val preset: QualityPreset? = null,
+    /** The codec a lossy preset encoded to; null for the copy. */
+    val videoCodec: VideoCodec? = null,
+    /** The MediaCodec component a lossy preset encoded with, such as "c2.qti.hevc.encoder". */
+    val videoEncoder: String? = null,
+    /** Whether that component is a hardware encoder. */
+    val videoHardware: Boolean? = null,
     val result: RipResult = RipResult.SUCCEEDED,
     /** Why the rip failed; null when it did not. */
     val failure: RipFailure? = null,

@@ -11,6 +11,7 @@ import be.discrip.data.LocalFolderAccess
 import be.discrip.data.SecretStore
 import be.discrip.data.SettingsRepository
 import be.discrip.drive.DriveManager
+import be.discrip.rip.DeviceEncoders
 import be.discrip.rip.RipLabels
 import be.discrip.rip.RipManager
 import be.discrip.rip.RipState
@@ -55,6 +56,9 @@ class AppContainer(context: Context) {
     val ripDraft = RipDraft()
     val drives = DriveManager(appContext, applicationScope)
     val history = HistoryStore(File(appContext.filesDir, "history.json"))
+
+    /** The device's video encoders, for the lossy presets. */
+    val encoders = DeviceEncoders()
 
     /** NAS rips wait here, in the app's own storage, until they are uploaded. */
     private val stagingDir = File(appContext.filesDir, "staging")

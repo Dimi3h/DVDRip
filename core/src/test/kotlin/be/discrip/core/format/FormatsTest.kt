@@ -30,6 +30,14 @@ class FormatsTest {
     }
 
     @Test
+    fun `encoding runs in frames per second, its pace against the film as a factor`() {
+        assertEquals("143 fps", Formats.framesPerSecond(142.6, dutch))
+        assertEquals("7,5 fps", Formats.framesPerSecond(7.46, dutch))
+        assertEquals("0,7×", Formats.pace(0.68, dutch))
+        assertEquals("12.0×", Formats.pace(12.0, Locale.US))
+    }
+
+    @Test
     fun `durations`() {
         assertEquals("2:05:09", Formats.duration(7_509))
         assertEquals("45:02", Formats.duration(2_702))

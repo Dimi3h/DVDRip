@@ -43,7 +43,7 @@ class RipNotifications(private val context: Context) {
         )
     }
 
-    /** One line on where the work stands: "Lezen en muxen · 42 %". */
+    /** One line on where the work stands: "Lezen en muxen · 42 %", "Lezen en encoderen · 42 % · nog 1:10:00". */
     fun progressText(running: RipState.Running?, retry: Retry?): String {
         val locale = locale()
         return when {
@@ -56,7 +56,8 @@ class RipNotifications(private val context: Context) {
             running.progress == null -> context.getString(R.string.rip_status_starting)
             else -> {
                 val progress = running.progress!!
-                val done = context.getString(R.string.notification_reading, percent(progress.fraction, locale))
+                val phase = if (running.job.quality.isLossy) R.string.notification_encoding else R.string.notification_reading
+                val done = context.getString(phase, percent(progress.fraction, locale))
                 progress.remainingMs?.let { context.getString(R.string.notification_left, done, Formats.duration(it / 1000)) } ?: done
             }
         }

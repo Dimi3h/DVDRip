@@ -27,8 +27,10 @@ internal object NativeRip {
 
     /**
      * The engine's JSON report; see `dr_rip.h`. Tracks come as parallel arrays in output order:
-     * stream id, `DR_TRACK_` flags ([be.discrip.core.dvd.TrackFlags]), language and name. The MKV
-     * goes to [output] when given, else to [outputFd]; both stay the caller's.
+     * stream id, `DR_TRACK_` flags ([be.discrip.core.dvd.TrackFlags]), language and name. With
+     * [videoEncoder] the video is re-encoded by that FFmpeg encoder on the MediaCodec component
+     * [videoComponent]. The MKV goes to [output] when given, else to [outputFd]; both stay the
+     * caller's.
      */
     @JvmStatic external fun rip(
         session: Long,
@@ -48,6 +50,10 @@ internal object NativeRip {
         tagKeys: Array<ByteArray?>,
         tagValues: Array<ByteArray?>,
         chapterNames: Array<ByteArray?>,
+        videoEncoder: ByteArray?,
+        videoComponent: ByteArray?,
+        videoBitRate: Long,
+        videoBitrateMode: ByteArray?,
         outputFd: Int,
         output: NativeFile?,
         listener: NativeProgress,
@@ -63,5 +69,5 @@ internal object NativeRip {
 
 /** Called from native code about twice a second while a rip runs. */
 internal fun interface NativeProgress {
-    fun onProgress(sectorsDone: Long, sectorsTotal: Long, outputBytes: Long, positionMs: Long)
+    fun onProgress(sectorsDone: Long, sectorsTotal: Long, outputBytes: Long, positionMs: Long, framesEncoded: Long)
 }
