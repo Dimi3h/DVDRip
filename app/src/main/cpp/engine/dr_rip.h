@@ -67,11 +67,13 @@ typedef struct dr_rip_options {
     int chapter_name_count;
     /* Where the file goes, written from position 0; stays the caller's. */
     dr_file output;
-    /* The lossy presets: an FFmpeg video encoder ("hevc_mediacodec", "h264_mediacodec"), or NULL
-       to copy the MPEG-2 video as it is. */
+    /* The lossy presets: "hevc_mediacodec" or "h264_mediacodec" for MediaCodec, or one of FFmpeg's
+       encoders (the host tests' "mpeg4"); NULL copies the MPEG-2 video as it is. */
     const char *video_encoder;
-    /* For MediaCodec: the component to encode with, or NULL for the first of its type. */
+    /* For MediaCodec: the component to encode with. */
     const char *video_component;
+    /* For MediaCodec: the colour format of its input buffers, 21 (NV12) or 19 (planar 4:2:0). */
+    int video_color_format;
     /* Target video bit rate in bit/s. */
     int64_t video_bit_rate;
     /* MediaCodec's bit rate mode, "vbr" or "cbr" (what the component supports), or NULL for its default. */

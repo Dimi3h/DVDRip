@@ -570,7 +570,7 @@ class RipManager(
                         }
                         val unavailable = (attempt as? RipOutcome.Failure)?.reason == RipFailure.ENCODER_UNAVAILABLE
                         if (!unavailable || index == encoders.lastIndex) break
-                        Log.w(TAG, "${candidate?.component} would not start (${(attempt as RipOutcome.Failure).message}); trying the next encoder")
+                        Log.w(TAG, "${candidate?.component} would not start (${attempt.message}); trying the next encoder")
                     }
                     checkNotNull(attempt)
                 } finally {

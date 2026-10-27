@@ -8,6 +8,7 @@ import be.discrip.core.history.RipResult
 import be.discrip.core.model.QualityPreset
 import be.discrip.core.model.VideoCodec
 import be.discrip.core.video.BitrateMode
+import be.discrip.core.video.BufferFormat
 import be.discrip.core.video.EncoderChoice
 import be.discrip.core.video.VideoEncoding
 import be.discrip.core.video.VideoPlan
@@ -126,7 +127,13 @@ class LossyEndToEndTest {
     }
 
     private companion object {
-        /** No such component: MediaCodec cannot create it, so FFmpeg's encoder will not open. */
-        val MISSING = VideoEncoding(VideoCodec.HEVC, "c2.discrip.missing.encoder", hardware = true, bitrateMode = BitrateMode.VBR)
+        /** No such component: MediaCodec cannot create it, so the encoder will not open. */
+        val MISSING = VideoEncoding(
+            VideoCodec.HEVC,
+            "c2.discrip.missing.encoder",
+            hardware = true,
+            bitrateMode = BitrateMode.VBR,
+            bufferFormat = BufferFormat.NV12,
+        )
     }
 }

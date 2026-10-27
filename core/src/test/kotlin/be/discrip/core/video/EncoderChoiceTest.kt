@@ -11,10 +11,12 @@ class EncoderChoiceTest {
 
     private val both = setOf(BitrateMode.VBR, BitrateMode.CBR)
 
-    private val hardwareHevc = EncoderInfo("c2.qti.hevc.encoder", VideoCodec.HEVC, hardware = true, fitsTitle = true, both)
-    private val hardwareAvc = EncoderInfo("c2.qti.avc.encoder", VideoCodec.H264, hardware = true, fitsTitle = true, both)
-    private val softwareHevc = EncoderInfo("c2.android.hevc.encoder", VideoCodec.HEVC, hardware = false, fitsTitle = true, both)
-    private val softwareAvc = EncoderInfo("c2.android.avc.encoder", VideoCodec.H264, hardware = false, fitsTitle = true, both)
+    private val nv12 = BufferFormat.NV12
+
+    private val hardwareHevc = EncoderInfo("c2.qti.hevc.encoder", VideoCodec.HEVC, hardware = true, fitsTitle = true, both, nv12)
+    private val hardwareAvc = EncoderInfo("c2.qti.avc.encoder", VideoCodec.H264, hardware = true, fitsTitle = true, both, nv12)
+    private val softwareHevc = EncoderInfo("c2.android.hevc.encoder", VideoCodec.HEVC, hardware = false, fitsTitle = true, both, nv12)
+    private val softwareAvc = EncoderInfo("c2.android.avc.encoder", VideoCodec.H264, hardware = false, fitsTitle = true, both, nv12)
 
     private fun components(plan: VideoPlan?) = assertNotNull(plan).encoders.map { it.component }
 
@@ -27,7 +29,7 @@ class EncoderChoiceTest {
             components(plan),
         )
         assertEquals(EncoderFallback.NONE, plan!!.fallbackOf())
-        assertEquals("hevc_mediacodec", plan.encoder.ffmpegEncoder)
+        assertEquals("hevc_mediacodec", plan.encoder.engineEncoder)
         assertEquals(BitrateMode.VBR, plan.encoder.bitrateMode)
         assertEquals(2_500, plan.bitRateKbps)
     }
@@ -38,7 +40,7 @@ class EncoderChoiceTest {
 
         assertEquals(listOf("c2.qti.avc.encoder", "c2.android.hevc.encoder"), components(plan))
         assertEquals(EncoderFallback.H264_INSTEAD_OF_HEVC, plan!!.fallbackOf())
-        assertEquals("h264_mediacodec", plan.encoder.ffmpegEncoder)
+        assertEquals("h264_mediacodec", plan.encoder.engineEncoder)
         assertEquals(1_200, plan.bitRateKbps)
         assertEquals(EncoderFallback.SOFTWARE, plan.fallbackOf(plan.encoders[1]))
     }
@@ -81,6 +83,16 @@ class EncoderChoiceTest {
         val plan = assertNotNull(EncoderChoice.plan(QualityPreset.BALANCED, 2_500, listOf(cbrOnly, unknown)))
 
         assertEquals(listOf(BitrateMode.CBR, null), plan.encoders.map { it.bitrateMode })
+    }
+
+    @Test
+    fun `each encoder gets frames in the layout it takes`() {
+        val planar = softwareAvc.copy(bufferFormat = BufferFormat.I420)
+
+        val plan = assertNotNull(EncoderChoice.plan(QualityPreset.BALANCED, 2_500, listOf(hardwareHevc, planar)))
+
+        assertEquals(listOf(BufferFormat.NV12, BufferFormat.I420), plan.encoders.map { it.bufferFormat })
+        assertEquals(listOf(21, 19), plan.encoders.map { it.bufferFormat.colorFormat })
     }
 
     @Test

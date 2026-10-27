@@ -105,6 +105,7 @@ add_library(engine STATIC
     engine/dr_common.c
     engine/dr_fd.c
     engine/dr_json.c
+    engine/dr_order.c
     engine/dr_plan.c
     engine/dr_probe.c
     engine/dr_reader.c
@@ -114,6 +115,11 @@ add_library(engine STATIC
 target_include_directories(engine PUBLIC engine)
 target_compile_options(engine PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(engine PUBLIC dvdread ff_avformat ff_avfilter ff_avcodec ff_swscale ff_avutil)
+if(ANDROID)
+    # MediaCodec through the NDK, which the engine drives itself for the lossy presets.
+    target_sources(engine PRIVATE engine/dr_mediacodec.c)
+    target_link_libraries(engine PUBLIC mediandk)
+endif()
 
 if(ANDROID)
     # libusb with its Linux usbfs backend and the Android configuration it ships. A separate
@@ -142,6 +148,11 @@ else()
     add_executable(discrip_host host/discrip_host.c)
     target_compile_options(discrip_host PRIVATE -Wall -Wextra -Werror)
     target_link_libraries(discrip_host PRIVATE engine)
+
+    # Unit tests of engine parts the test DVD cannot reach, such as reordered MediaCodec output.
+    add_executable(engine_unit_tests host/engine_unit_tests.c)
+    target_compile_options(engine_unit_tests PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(engine_unit_tests PRIVATE engine)
 
     # CSS test helpers from libdvdcss's own code: test vectors for the Kotlin port of the
     # authentication cipher, and scrambling a test image like a CSS-protected disc.

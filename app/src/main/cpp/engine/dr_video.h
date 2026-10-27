@@ -1,10 +1,10 @@
 /*
  * The video of the lossy presets: MPEG-2 decoded in software, deinterlaced with yadif only where
  * frames are flagged interlaced, given the sample aspect ratio that shows the picture at the
- * DVD's aspect, and encoded at the title's size and frame rate by the encoder the app chose
- * (hevc_mediacodec or h264_mediacodec; a software encoder in the host tests). The size is that of
- * the first frames, or the IFO's when that is clearly larger, so a title that opens with a part
- * at half resolution is not made smaller; frames of another size are scaled to it.
+ * DVD's aspect, and encoded at the title's size and frame rate by the encoder the app chose:
+ * MediaCodec's (dr_mediacodec.h) on Android, one of FFmpeg's own in the host tests. The size is
+ * that of the first frames, or the IFO's when that is clearly larger, so a title that opens with
+ * a part at half resolution is not made smaller; frames of another size are scaled to it.
  */
 #ifndef DR_VIDEO_H
 #define DR_VIDEO_H
@@ -15,20 +15,25 @@
 #include <libavformat/avformat.h>
 
 typedef struct dr_video_config {
-    /* FFmpeg encoder name, such as "hevc_mediacodec". */
+    /* "hevc_mediacodec" or "h264_mediacodec" for MediaCodec, named after FFmpeg's wrappers of it;
+       else the name of one of FFmpeg's encoders, such as "mpeg4". */
     const char *encoder;
-    /* For MediaCodec encoders: the component to use, such as "c2.qti.hevc.encoder"; NULL lets
-       MediaCodec pick the first for the type. */
+    /* For MediaCodec: the component to use, such as "c2.qti.hevc.encoder". */
     const char *component;
+    /* For MediaCodec: the colour format of its input buffers, 21 (NV12) or 19 (planar 4:2:0). */
+    int color_format;
     /* Target bit rate in bit/s. */
     int64_t bit_rate;
-    /* For MediaCodec encoders: "vbr", "cbr" or "cq"; NULL leaves the component's default. */
+    /* For MediaCodec: "vbr" or "cbr"; NULL leaves the component's own mode. */
     const char *bitrate_mode;
     /* Display aspect ratio from the IFO (4:3 or 16:9); 0/0 to keep the stream's own. */
     AVRational display_aspect;
     /* The picture size the IFO gives the title set; 0 when unknown. */
     int title_width;
     int title_height;
+    /* Polled while waiting on MediaCodec; non-zero stops the encoding with AVERROR_EXIT. */
+    int (*cancelled)(void *opaque);
+    void *cancel_opaque;
 } dr_video_config;
 
 typedef struct dr_video dr_video;
@@ -38,8 +43,9 @@ typedef int (*dr_video_emit)(void *opaque, AVPacket *packet);
 
 /*
  * Opens the decoder, the encoder and the filters between them for the input stream in. With
- * global_header the encoder puts its parameter sets in extradata, as Matroska wants. Returns 0,
- * or a negative error with a message in error.
+ * global_header FFmpeg's encoders put their parameter sets in extradata, as Matroska wants;
+ * MediaCodec's are learned before it starts (dr_mediacodec.h). Returns 0, or a negative error
+ * with a message in error.
  */
 int dr_video_open(dr_video **out, const AVStream *in, const dr_video_config *config, int global_header,
                   const dr_logger *logger, char *error, size_t error_size);

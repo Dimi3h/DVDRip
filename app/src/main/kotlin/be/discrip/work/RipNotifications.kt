@@ -55,7 +55,7 @@ class RipNotifications(private val context: Context) {
                 context.getString(R.string.rip_status_uploading, percent(running.upload?.fraction ?: 0f, locale))
             running.progress == null -> context.getString(R.string.rip_status_starting)
             else -> {
-                val progress = running.progress!!
+                val progress = running.progress
                 val phase = if (running.job.quality.isLossy) R.string.notification_encoding else R.string.notification_reading
                 val done = context.getString(phase, percent(progress.fraction, locale))
                 progress.remainingMs?.let { context.getString(R.string.notification_left, done, Formats.duration(it / 1000)) } ?: done

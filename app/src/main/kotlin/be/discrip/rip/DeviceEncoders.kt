@@ -7,6 +7,7 @@ import android.media.MediaCodecList
 import android.media.MediaFormat
 import be.discrip.core.model.VideoCodec
 import be.discrip.core.video.BitrateMode
+import be.discrip.core.video.BufferFormat
 import be.discrip.core.video.EncoderInfo
 
 /**
@@ -40,7 +41,7 @@ class DeviceEncoders(private val source: () -> List<MediaCodecInfo> = { MediaCod
             name = info.name,
             codec = codec,
             hardware = info.isHardwareAccelerated,
-            takesBuffers = capabilities.colorFormats.any { it in BUFFER_FORMATS },
+            bufferFormat = bufferFormat(capabilities.colorFormats.toSet()),
             fitsSize = video::isSizeSupported,
             bitrateModes = buildSet {
                 if (encoder?.isBitrateModeSupported(EncoderCapabilities.BITRATE_MODE_VBR) == true) add(BitrateMode.VBR)
@@ -51,16 +52,19 @@ class DeviceEncoders(private val source: () -> List<MediaCodecInfo> = { MediaCod
 
     private companion object {
         /**
-         * FFmpeg hands MediaCodec the frames in buffers, as NV12 or planar 4:2:0, so an encoder must
-         * take one of those or the flexible 4:2:0 that covers both. The first two are deprecated in
-         * favour of the third, but encoders still list them and FFmpeg asks for them by name.
+         * The layout in which the engine hands frames to an encoder that lists [formats]: NV12 where
+         * it lists that, or only the flexible 4:2:0, which the platform fills from either; planar
+         * 4:2:0 where it lists that and not NV12; null where it lists neither. The two are deprecated
+         * in favour of the flexible format, but encoders still list them, and only they fix the
+         * layout of a buffer, which the engine writes without Java's Image.
          */
         @Suppress("DEPRECATION")
-        val BUFFER_FORMATS = setOf(
-            CodecCapabilities.COLOR_FormatYUV420SemiPlanar,
-            CodecCapabilities.COLOR_FormatYUV420Planar,
-            CodecCapabilities.COLOR_FormatYUV420Flexible,
-        )
+        fun bufferFormat(formats: Set<Int>): BufferFormat? = when {
+            CodecCapabilities.COLOR_FormatYUV420SemiPlanar in formats -> BufferFormat.NV12
+            CodecCapabilities.COLOR_FormatYUV420Planar in formats -> BufferFormat.I420
+            CodecCapabilities.COLOR_FormatYUV420Flexible in formats -> BufferFormat.NV12
+            else -> null
+        }
     }
 }
 
@@ -72,13 +76,22 @@ class EncoderCatalog(private val entries: List<Entry>) {
         val name: String,
         val codec: VideoCodec,
         val hardware: Boolean,
-        val takesBuffers: Boolean,
+        /** Null when it takes no frames in buffers the engine can fill. */
+        val bufferFormat: BufferFormat?,
         val fitsSize: (width: Int, height: Int) -> Boolean,
         val bitrateModes: Set<BitrateMode>,
     )
 
     /** Every encoder, in the platform's order of preference, with whether it can take a title of [width] by [height]. */
     fun forTitle(width: Int, height: Int): List<EncoderInfo> = entries.map { entry ->
-        EncoderInfo(entry.name, entry.codec, entry.hardware, entry.takesBuffers && entry.fitsSize(width, height), entry.bitrateModes)
+        EncoderInfo(
+            name = entry.name,
+            codec = entry.codec,
+            hardware = entry.hardware,
+            fitsTitle = entry.bufferFormat != null && entry.fitsSize(width, height),
+            bitrateModes = entry.bitrateModes,
+            // Only read where it fits.
+            bufferFormat = entry.bufferFormat ?: BufferFormat.NV12,
+        )
     }
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds the rip engine for the build machine, plain and with AddressSanitizer and UBSan, and runs
-# native/tests/test_engine.py against a freshly authored test DVD (and CSS-scrambled copies of it).
-# Also checks that the Kotlin port of the CSS cipher in core is tested against what libdvdcss
-# computes. No phone needed.
+# its unit tests and native/tests/test_engine.py against a freshly authored test DVD (and
+# CSS-scrambled copies of it). Also checks that the Kotlin port of the CSS cipher in core is tested
+# against what libdvdcss computes. No phone needed.
 #
 #   test-engine.sh
 #
@@ -41,6 +41,7 @@ trap 'rm -rf "$work"' EXIT
 
 for build in host host-asan; do
     echo "== Engine tests ($build)"
+    "$native/build/$build/engine_unit_tests"
     DISCRIP_HOST="$native/build/$build/discrip_host" CSS_TOOL="$native/build/$build/css_tool" \
         TEST_ISO="$work/test-dvd.iso" TEST_FOLDER="$work/folder" python3 "$native/tests/test_engine.py"
 done

@@ -18,9 +18,11 @@ android_api=29
 [ -f "$source_dir/configure" ] || { echo "FFmpeg sources missing: run native/scripts/fetch-sources.sh" >&2; exit 1; }
 
 # DVD-Video in, Matroska out. The lossless path copies MPEG-2, AC-3, DTS and MPEG audio and
-# re-encodes LPCM to PCM or FLAC; the lossy presets decode MPEG-2, filter (deinterlace, scale,
-# aspect ratio) and encode with MediaCodec, whose H.264 and HEVC get the aspect ratio written into
-# their parameter sets by the metadata bitstream filters. LGPL: no --enable-gpl, no --enable-nonfree.
+# re-encodes LPCM to PCM or FLAC; the lossy presets decode MPEG-2 and filter it (deinterlace,
+# scale, aspect ratio) here, encode with MediaCodec, which the engine drives itself rather than
+# through FFmpeg (engine/dr_mediacodec.h), and have the aspect ratio written into the parameter
+# sets of its H.264 and HEVC by the metadata bitstream filters. LGPL: no --enable-gpl, no
+# --enable-nonfree.
 components=(
     --disable-everything
     --disable-autodetect
@@ -37,7 +39,7 @@ components=(
     --enable-parser=mpegvideo,ac3,dca,mpegaudio,dvdsub,dvd_nav
     --enable-filter=buffer,buffersink,yadif,bwdif,scale,format,setsar,null
     --enable-protocol=file,fd
-    --enable-bsf=extract_extradata,h264_metadata,hevc_metadata
+    --enable-bsf=h264_metadata,hevc_metadata
 )
 
 sha256() {
@@ -72,9 +74,6 @@ case "$target" in
             --enable-shared
             --disable-static
             --enable-pic
-            --enable-jni
-            --enable-mediacodec
-            --enable-encoder=hevc_mediacodec,h264_mediacodec
             # 16 KB page alignment for Android 15+ devices with 16 KB pages.
             --extra-ldflags="-Wl,-z,max-page-size=16384"
         )

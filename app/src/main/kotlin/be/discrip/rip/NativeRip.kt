@@ -28,8 +28,9 @@ internal object NativeRip {
     /**
      * The engine's JSON report; see `dr_rip.h`. Tracks come as parallel arrays in output order:
      * stream id, `DR_TRACK_` flags ([be.discrip.core.dvd.TrackFlags]), language and name. With
-     * [videoEncoder] the video is re-encoded by that FFmpeg encoder on the MediaCodec component
-     * [videoComponent]. The MKV goes to [output] when given, else to [outputFd]; both stay the
+     * [videoEncoder] ("hevc_mediacodec" or "h264_mediacodec") the video is re-encoded by the
+     * MediaCodec component [videoComponent], which takes frames in colour format
+     * [videoColorFormat]. The MKV goes to [output] when given, else to [outputFd]; both stay the
      * caller's.
      */
     @JvmStatic external fun rip(
@@ -54,6 +55,7 @@ internal object NativeRip {
         videoComponent: ByteArray?,
         videoBitRate: Long,
         videoBitrateMode: ByteArray?,
+        videoColorFormat: Int,
         outputFd: Int,
         output: NativeFile?,
         listener: NativeProgress,

@@ -190,8 +190,8 @@ private fun RecordSheet(container: AppContainer, record: RipRecord, retry: Retry
         if (pending != null) {
             GroupedSection(
                 footer = when {
-                    busy && retry?.stage == RipStage.PLEX -> stringResource(R.string.rip_stage_plex)
-                    busy -> stringResource(R.string.rip_status_uploading, percent(retry?.progress?.fraction ?: 0f, locale))
+                    busy && retry.stage == RipStage.PLEX -> stringResource(R.string.rip_stage_plex)
+                    busy -> stringResource(R.string.rip_status_uploading, percent(retry.progress?.fraction ?: 0f, locale))
                     pending.stagedFile != null -> stringResource(R.string.history_pending_footer)
                     else -> stringResource(R.string.history_pending_local_footer)
                 },

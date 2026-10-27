@@ -192,8 +192,8 @@ authentication, comes in phase 6 (see "CSS on real drives" below).
   An encoder that will not start makes way for the next before anything is written.
 - **Progress**: frames per second and the pace against the film (in orange below 1×, when the rip
   takes longer than the film), the time left, and "Lezen en encoderen" in the notification.
-- **Errors**: no encoder that starts (nothing is written), an encoder that fails during the rip
-  (the unfinished file is deleted, and the screen says so).
+- **Errors**: no encoder that starts (nothing is written), an encoder that fails or stalls during
+  the rip (the unfinished file is deleted, and the screen says so).
 - **History**: every rip records its quality and, for a lossy one, the encoder.
 
 ## Building
@@ -343,10 +343,12 @@ app/                      Android app
   work/                   The foreground service and its notifications
   src/main/cpp/           CMake build of libusb, libdvdcss, libdvdread and the engine
     engine/               The rip engine in C: sources, title plans, VOBU reader, remux to MKV,
-                          and the lossy presets' video (dr_video: decode, yadif, aspect, encode)
+                          and the lossy presets' video (dr_video: decode, yadif, aspect, encode;
+                          dr_mediacodec: MediaCodec through the NDK)
     jni/, usb_jni.c       JNI bridges for the engine and for libusb
     host/                 discrip_host, the engine's command-line driver for the build machine,
-                          and css_tool (CSS test vectors and scrambled copies from libdvdcss)
+                          css_tool (CSS test vectors and scrambled copies from libdvdcss) and
+                          engine_unit_tests
     config/               Hand-written config.h for libdvdcss and libdvdread
   ui/theme, ui/components HIG theme and components
   ui/home, ui/metadata, ui/settings, ui/source, ui/rip, ui/history, ui/navigation
@@ -453,9 +455,10 @@ These were made without asking because they do not change the architecture; each
 19. **FFmpeg build.** FFmpeg 9.0.2, configured as LGPL (no `--enable-gpl`, no `--enable-nonfree`)
     with only the demuxers, muxer, decoders, encoders, parsers and filters DiscRip uses (see
     `native/scripts/build-ffmpeg.sh`), as shared libraries with unversioned names: for the lossy
-    presets the MediaCodec encoders, the yadif, scale, setsar and format filters, and the
-    `h264_metadata` and `hevc_metadata` bitstream filters (decision 42). The build machine's static
-    FFmpeg adds the MPEG-4 Part 2 encoder for the engine tests.
+    presets the yadif, scale, setsar and format filters and the `h264_metadata` and
+    `hevc_metadata` bitstream filters (decision 42). The engine drives MediaCodec itself (decision
+    47), so FFmpeg is built without JNI and without its MediaCodec wrappers. The build machine's
+    static FFmpeg adds the MPEG-4 Part 2 encoder for the engine tests.
 20. **Licenses.** libdvdcss and libdvdread are GPL-2.0-or-later and are linked statically into
     `libdiscrip.so`, so that library, and with it the app, falls under the GPL. That is fine for a
     personal app that is not distributed; anyone who passes the APK on must offer this source
@@ -549,23 +552,23 @@ These were made without asking because they do not change the architecture; each
     authentication, region, faults) is a test fixture that the instrumented tests use too.
 41. **The lossy video path** (`engine/dr_video.c`). FFmpeg decodes the MPEG-2 video in software
     (slice threads). A filter graph, built for the frames as they come and rebuilt when their size,
-    format or colours change, runs `yadif=mode=send_frame:parity=auto:deint=interlaced` (only
-    frames flagged interlaced, one frame out per frame in), `scale` to the title's size, `setsar`
-    and `format` (NV12, else planar 4:2:0, whichever the encoder starts with). The title's size is
-    that of its first frames, or the IFO's when that is clearly larger, so a title that opens with
-    a part at half resolution (a logo, say) is not encoded small; frames of another size are scaled
-    to it, the rest pass `scale` untouched. The pixel aspect follows from the
-    IFO's display aspect and the full frame, as FFmpeg's MPEG-2 decoder and the lossless copy have
-    it: 64:45 for 720×576 at 16:9, 16:15 at 4:3, 32:27 and 8:9 for NTSC. Frame times stay as on the
-    disc, so soft-telecined film keeps its 24 frames a second.
+    format or colours change, runs `yadif=mode=send_frame:parity=auto:deint=interlaced` (only frames
+    flagged interlaced, one frame out per frame in), `scale` to the title's size, `setsar` and
+    `format` (the layout the MediaCodec encoder takes, decision 44; for FFmpeg's own encoders NV12,
+    else planar 4:2:0, whichever starts). The title's size is that of its first frames, or the IFO's
+    when that is clearly larger, so a title that opens with a part at half resolution (a logo, say)
+    is not encoded small; frames of another size are scaled to it, the rest pass `scale` untouched.
+    The pixel aspect follows from the IFO's display aspect and the full frame, as FFmpeg's MPEG-2
+    decoder and the lossless copy have it: 64:45 for 720×576 at 16:9, 16:15 at 4:3, 32:27 and 8:9
+    for NTSC. Frame times stay as on the disc, so soft-telecined film keeps its 24 frames a second.
 42. **The aspect ratio in the stream as well.** MediaCodec has no portable way to put the pixel
     aspect into the SPS, and a player that ignores Matroska's display size (or a Plex remux to
     MPEG-TS for a TV) would show a 16:9 disc squeezed. FFmpeg's `hevc_metadata` and `h264_metadata`
     bitstream filters therefore write it into the parameter sets, in the CodecPrivate and in the
     stream; Matroska's display size carries it too. CI takes the emulator's stream out of Matroska
     and checks it with ffprobe.
-43. **Encoder time base.** MediaCodec gets the disc's 90 kHz clock (it converts to microseconds and
-    keeps its own rate control), so every frame keeps its exact time, also where the frame rate
+43. **Encoder time base.** MediaCodec gets each frame's time in microseconds, its own clock, and
+    keeps its own rate control, so every frame keeps its exact time, also where the frame rate
     changes within a title, as with film and video mixed on NTSC discs; rounded to ticks of one
     frame, such frames would collide and drift away from the sound. FFmpeg's own encoders (the
     MPEG-4 stand-in on the build machine) count frames in the time base to spread the bit rate, so
@@ -575,19 +578,38 @@ These were made without asking because they do not change the architecture; each
     then hardware H.264, then software HEVC, then software H.264; for "Breed compatibel" hardware,
     then software H.264. The preset's bit rate stays on a fallback, so the file comes out at the size
     shown; H.264 at HEVC's rate looks somewhat worse, and the screen says H.264 is used. VBR where
-    the encoder can, else CBR, else its own mode. FFmpeg drives MediaCodec through the NDK (it gets
-    no JVM) and opens the component by name (`codec_name`).
+    the encoder can, else CBR, else its own mode. The engine opens the component by name (decision
+    47) and hands it frames in the layout it lists: NV12, else planar 4:2:0; NV12 also where it
+    lists only flexible 4:2:0, which the platform fills from either.
 45. **Encoder failures.** An encoder that will not open fails the engine before it writes, and the
-    next one takes over, in the same file. One that fails during the rip ends it; the unfinished
-    file is deleted and the message says so. Starting over with another encoder by itself would
-    double the time of a long rip, so that is left to the user ("Breed compatibel" or "Beste
-    kwaliteit").
+    next one takes over, in the same file. One that fails during the rip, or takes no frame and
+    gives nothing back for 30 seconds, ends it; the unfinished file is deleted and the message says
+    so. Starting over with another encoder by itself would double the time of a long rip, so that is
+    left to the user ("Breed compatibel" or "Beste kwaliteit").
 46. **Testing without MediaCodec.** The build machine has no MediaCodec, so its FFmpeg adds the
     MPEG-4 Part 2 encoder and the engine tests run the whole lossy path with it: yadif checked with
     FFmpeg's `idet` on an interlaced title of the test DVD, the bit rate, the 16:9 aspect, audio and
     subtitles packet for packet as in the lossless rip, write failures, cancelling, a missing
     encoder. The emulator rips "Gebalanceerd" through the app with its own (software) encoders,
     also with an encoder that will not start, and leaves the file for CI's ffprobe check.
+47. **MediaCodec without FFmpeg's wrapper.** The plan was FFmpeg's `hevc_mediacodec` and
+    `h264_mediacodec` encoders. They do not hold up here: to have the parameter sets Matroska wants
+    before the first frame, they encode a dummy frame, end the stream and flush the codec to go on,
+    which Android leaves undefined for encoders (the emulator's encoder stops there, and the rip
+    hung); they copy frames at a stride of their own rather than the one the codec gives; and they
+    wait for a stuck codec without end, out of reach of cancelling. The engine therefore drives
+    MediaCodec itself through the NDK (`engine/dr_mediacodec.c`): a first, short-lived instance
+    encodes one black frame to learn the parameter sets, then the real one starts afresh; frames go
+    in at the codec's stride and slice height; every wait on the codec has a deadline and looks at
+    cancelling in between. The codec is asked to plan for 480 frames a second (its operating rate)
+    at best-effort priority, as Android's own transcoder asks at 720p, since it otherwise plans its
+    resources for the film's frame rate; one that will not start that way starts without. MediaCodec
+    gives no decoding times, so the engine derives them (`engine/dr_order.c`): a frame decodes at
+    the time of the earliest frame still in the encoder, which is its own time unless an encoder
+    makes B-frames although it is asked for none, and then still never lies after it nor before the
+    frame before. `engine_unit_tests` checks that for reordered, dropped and retimed frames, which
+    the emulator's encoder never produces. FFmpeg still decodes, filters, writes the aspect ratio
+    into the stream and muxes.
 
 ## CSS on real drives (phase 6)
 
@@ -735,6 +757,10 @@ Phase 7 on a phone:
    "Meeste compressie".
 6. On a phone without a hardware HEVC encoder (older or budget models) the source screen says the
    rip uses H.264.
+7. The log (`adb logcat -s DiscRip`) names the encoder and the layout it takes ("takes 720x576
+   frames at stride …"); a picture that is skewed or has a green band would mean the encoder
+   reports its stride or slice height wrongly, so note the component.
+8. Cancel a lossy rip halfway: it stops within a second and leaves no file.
 
 ## Privacy
 

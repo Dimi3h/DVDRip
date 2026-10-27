@@ -3,13 +3,25 @@ package be.discrip.core.video
 import be.discrip.core.model.QualityPreset
 import be.discrip.core.model.VideoCodec
 
-/** How a MediaCodec encoder keeps to its bit rate; [ffmpegName] is FFmpeg's bitrate_mode value. */
-enum class BitrateMode(val ffmpegName: String) {
+/** How a MediaCodec encoder keeps to its bit rate; [engineName] is the engine's name for it. */
+enum class BitrateMode(val engineName: String) {
     /** Variable: more bits where the picture needs them, as the presets want. */
     VBR("vbr"),
 
     /** Constant, for encoders that cannot vary it. */
     CBR("cbr"),
+}
+
+/**
+ * How the engine lays out the frames it hands MediaCodec in input buffers; [colorFormat] is
+ * MediaCodec's number for it (MediaCodecInfo.CodecCapabilities).
+ */
+enum class BufferFormat(val colorFormat: Int) {
+    /** COLOR_FormatYUV420SemiPlanar: the luma plane, then U and V interleaved. */
+    NV12(21),
+
+    /** COLOR_FormatYUV420Planar: the luma plane, then U, then V. */
+    I420(19),
 }
 
 /** A video encoder of the device (from MediaCodecList), as far as choosing one needs. */
@@ -19,9 +31,11 @@ data class EncoderInfo(
     val codec: VideoCodec,
     /** Runs on dedicated hardware rather than on the CPU. */
     val hardware: Boolean,
-    /** Takes frames of the title's size, from buffers as FFmpeg hands them over. */
+    /** Takes frames of the title's size, from buffers as the engine hands them over. */
     val fitsTitle: Boolean,
     val bitrateModes: Set<BitrateMode>,
+    /** The layout it takes frames in, where it [fitsTitle]. */
+    val bufferFormat: BufferFormat,
 )
 
 /** The encoder a lossy rip uses. */
@@ -32,9 +46,10 @@ data class VideoEncoding(
     val hardware: Boolean,
     /** Null leaves the component's own mode. */
     val bitrateMode: BitrateMode?,
+    val bufferFormat: BufferFormat,
 ) {
-    /** FFmpeg's name for MediaCodec's encoder of [codec]. */
-    val ffmpegEncoder: String
+    /** The engine's name for MediaCodec's encoder of [codec], after FFmpeg's. */
+    val engineEncoder: String
         get() = when (codec) {
             VideoCodec.HEVC -> "hevc_mediacodec"
             VideoCodec.H264 -> "h264_mediacodec"
@@ -91,7 +106,9 @@ object EncoderChoice {
         val ordered = listOf(true, false).flatMap { hardware ->
             codecs.flatMap { codec -> fitting.filter { it.hardware == hardware && it.codec == codec } }
         }
-        val encoders = ordered.map { info -> VideoEncoding(info.codec, info.name, info.hardware, modeFor(info)) }.distinct()
+        val encoders = ordered.map { info ->
+            VideoEncoding(info.codec, info.name, info.hardware, modeFor(info), info.bufferFormat)
+        }.distinct()
         if (encoders.isEmpty()) return null
         return VideoPlan(preset, QualityPreset.clampBitrate(bitRateKbps), encoders)
     }

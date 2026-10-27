@@ -796,8 +796,9 @@ static int transcode_video(rip *r, AVPacket *packet, const AVStream *in) {
     return dr_video_send(r->video, packet, emit_video, r);
 }
 
-/* The encoder failed, or the muxer under it. */
+/* The encoder failed, or the muxer under it, or the rip was cancelled while it waited on MediaCodec. */
 static char *video_failure(rip *r, int result) {
+    if (result == AVERROR_EXIT || is_cancelled(r)) return failure("cancelled", "The rip was cancelled");
     if (r->write_errno != 0) return write_failure(r);
     char message[200];
     snprintf(message, sizeof(message), "The video encoder failed: %s", av_err2str(result));
@@ -909,15 +910,19 @@ char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hoo
         dr_video_config config = {
             .encoder = options->video_encoder,
             .component = options->video_component,
+            .color_format = options->video_color_format,
             .bit_rate = options->video_bit_rate,
             .bitrate_mode = options->video_bitrate_mode,
             .display_aspect = aspect == 3 ? (AVRational) {16, 9} : aspect == 0 ? (AVRational) {4, 3} : (AVRational) {0, 0},
             .title_width = title_width,
             .title_height = title_height,
+            .cancelled = is_cancelled,
+            .cancel_opaque = r,
         };
         result = dr_video_open(&r->video, r->in->streams[r->video_in], &config, 1, &r->logger, error, sizeof(error));
         if (result < 0) {
-            report = failure("encoder_unavailable", error);
+            report = result == AVERROR_EXIT || is_cancelled(r) ? failure("cancelled", "The rip was cancelled")
+                                                              : failure("encoder_unavailable", error);
             goto done;
         }
     }

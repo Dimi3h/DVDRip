@@ -1,5 +1,9 @@
 #include "dr_video.h"
 
+#ifdef __ANDROID__
+#include "dr_mediacodec.h"
+#endif
+
 #include <libavcodec/bsf.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
@@ -7,6 +11,7 @@
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,10 +19,23 @@
 /* Seconds between key frames: often enough to seek well, rare enough to cost little. */
 #define KEY_FRAME_SECONDS 2
 
+/* The names the app gives MediaCodec's encoders, after FFmpeg's. */
+#define HEVC_MEDIACODEC "hevc_mediacodec"
+#define H264_MEDIACODEC "h264_mediacodec"
+
 struct dr_video {
     dr_logger logger;
     AVCodecContext *decoder;
+    /* One of FFmpeg's own encoders (the host tests' MPEG-4), or else MediaCodec. */
     AVCodecContext *encoder;
+#ifdef __ANDROID__
+    dr_mediacodec *mediacodec;
+#endif
+    /* What the encoder makes: codec, size, parameter sets. */
+    AVCodecParameters *output;
+    enum AVPixelFormat encoder_format;
+    AVRational time_base;
+    AVRational frame_rate;
     /* Writes the aspect ratio into the parameter sets of H.264 and HEVC, which MediaCodec leaves
        out; NULL for encoders that write it themselves. */
     AVBSFContext *bitstream;
@@ -45,12 +63,7 @@ struct dr_video {
     int64_t last_pts;
 };
 
-/* Whether the encoder has an option of this name, as only MediaCodec's have codec_name. */
-static int has_option(const AVCodec *codec, const char *name) {
-    return codec->priv_class != NULL && av_opt_find((void *) &codec->priv_class, name, NULL, 0, AV_OPT_SEARCH_FAKE_OBJ) != NULL;
-}
-
-/* The pixel formats to try, best first: NV12 suits most hardware encoders, then planar 4:2:0. */
+/* The pixel formats to try, best first: NV12 suits most encoders, then planar 4:2:0. */
 static int candidate_formats(const AVCodec *codec, enum AVPixelFormat *out, int capacity) {
     const enum AVPixelFormat *formats = NULL;
     int count = 0;
@@ -105,15 +118,17 @@ static int open_decoder(dr_video *video, const AVStream *in, char *error, size_t
     return result;
 }
 
-/* Opens the encoder with the first pixel format it accepts; MediaCodec says only by trying. */
-static int open_encoder(dr_video *video, const AVStream *in, const dr_video_config *config, int global_header,
-                        char *error, size_t error_size) {
+/*
+ * One of FFmpeg's own encoders, with the first pixel format it accepts. They plan the bit rate by
+ * counting frames in the time base, so they get one tick per frame, as ffmpeg gives them; timing
+ * that varies is rounded to the nearest frame.
+ */
+static int open_ffmpeg_encoder(dr_video *video, const dr_video_config *config, int global_header, char *error, size_t error_size) {
     const AVCodec *codec = avcodec_find_encoder_by_name(config->encoder);
     if (codec == NULL) {
         dr_set_error(error, error_size, "This build has no encoder %s", config->encoder);
         return AVERROR_ENCODER_NOT_FOUND;
     }
-    AVRational rate = frame_rate_of(in);
     enum AVPixelFormat formats[16];
     int format_count = candidate_formats(codec, formats, 16);
     int result = AVERROR_ENCODER_NOT_FOUND;
@@ -124,38 +139,24 @@ static int open_encoder(dr_video *video, const AVStream *in, const dr_video_conf
         encoder->height = video->height;
         encoder->pix_fmt = formats[i];
         encoder->sample_aspect_ratio = video->sar;
-        /* MediaCodec takes microseconds and keeps its own rate control: it gets the disc's 90 kHz
-           clock, so every frame keeps its time, also where the frame rate changes within a title
-           (film and video mixed, as on NTSC discs). FFmpeg's own encoders, the host tests' MPEG-4
-           among them, count frames in the time base to spread the bit rate: they get one tick per
-           frame, as ffmpeg gives them. */
-        encoder->time_base = codec->wrapper_name != NULL ? in->time_base : av_inv_q(rate);
-        encoder->framerate = rate;
+        encoder->time_base = av_inv_q(video->frame_rate);
+        encoder->framerate = video->frame_rate;
         encoder->bit_rate = config->bit_rate;
-        encoder->gop_size = (int) (av_q2d(rate) * KEY_FRAME_SECONDS + 0.5);
-        /* MediaCodec gives B-frames no DTS of their own; without them PTS serve as DTS. */
+        encoder->gop_size = (int) (av_q2d(video->frame_rate) * KEY_FRAME_SECONDS + 0.5);
         encoder->max_b_frames = 0;
         encoder->color_range = video->decoder->color_range;
         encoder->color_primaries = video->decoder->color_primaries;
         encoder->color_trc = video->decoder->color_trc;
         encoder->colorspace = video->decoder->colorspace;
         if (global_header) encoder->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-        AVDictionary *options = NULL;
-        if (config->bitrate_mode != NULL && config->bitrate_mode[0] && has_option(codec, "bitrate_mode")) {
-            av_dict_set(&options, "bitrate_mode", config->bitrate_mode, 0);
-        }
-        if (config->component != NULL && config->component[0] && has_option(codec, "codec_name")) {
-            av_dict_set(&options, "codec_name", config->component, 0);
-        }
-        result = avcodec_open2(encoder, codec, &options);
-        av_dict_free(&options);
+        result = avcodec_open2(encoder, codec, NULL);
         if (result >= 0) {
             video->encoder = encoder;
-            dr_logf(&video->logger, DR_LOG_INFO, "Encoding %dx%d %s at %d/%d fps with %s%s%s at %lld kbit/s", video->width,
-                    video->height, av_get_pix_fmt_name(formats[i]), rate.num, rate.den, config->encoder,
-                    config->component != NULL ? " " : "", config->component != NULL ? config->component : "",
-                    (long long) (config->bit_rate / 1000));
-            return 0;
+            video->encoder_format = formats[i];
+            video->time_base = encoder->time_base;
+            video->output = avcodec_parameters_alloc();
+            if (video->output == NULL) return AVERROR(ENOMEM);
+            return avcodec_parameters_from_context(video->output, encoder);
         }
         dr_logf(&video->logger, DR_LOG_WARN, "%s does not start with %s: %s", config->encoder, av_get_pix_fmt_name(formats[i]),
                 av_err2str(result));
@@ -165,10 +166,86 @@ static int open_encoder(dr_video *video, const AVStream *in, const dr_video_conf
     return result;
 }
 
+#ifdef __ANDROID__
+/*
+ * MediaCodec, on the component the app chose (dr_mediacodec.h). It takes microseconds and keeps
+ * its own rate control, so frames keep their times from the disc, also where the frame rate
+ * changes within a title (film and video mixed, as on NTSC discs).
+ */
+static int open_mediacodec(dr_video *video, const dr_video_config *config, char *error, size_t error_size) {
+    int hevc = strcmp(config->encoder, HEVC_MEDIACODEC) == 0;
+    int pal = video->height == 576 || video->height == 288;
+    dr_mediacodec_config codec_config = {
+        .component = config->component,
+        .mime = hevc ? "video/hevc" : "video/avc",
+        .width = video->width,
+        .height = video->height,
+        .color_format = config->color_format,
+        .bit_rate = config->bit_rate,
+        .bitrate_mode = config->bitrate_mode == NULL ? -1
+                        : strcmp(config->bitrate_mode, "vbr") == 0 ? 1
+                        : strcmp(config->bitrate_mode, "cbr") == 0 ? 2 : -1,
+        .frame_rate = (int) lround(av_q2d(video->frame_rate)),
+        .key_frame_seconds = KEY_FRAME_SECONDS,
+        .pal = pal,
+        .cancelled = config->cancelled,
+        .cancel_opaque = config->cancel_opaque,
+    };
+    int result = dr_mediacodec_open(&video->mediacodec, &codec_config, &video->logger, error, error_size);
+    if (result < 0) return result;
+    size_t size = 0;
+    const uint8_t *parameter_sets = dr_mediacodec_parameter_sets(video->mediacodec, &size);
+    AVCodecParameters *output = avcodec_parameters_alloc();
+    if (output == NULL) return AVERROR(ENOMEM);
+    video->output = output;
+    output->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (output->extradata == NULL) return AVERROR(ENOMEM);
+    memcpy(output->extradata, parameter_sets, size);
+    output->extradata_size = (int) size;
+    output->codec_type = AVMEDIA_TYPE_VIDEO;
+    output->codec_id = hevc ? AV_CODEC_ID_HEVC : AV_CODEC_ID_H264;
+    output->width = video->width;
+    output->height = video->height;
+    output->sample_aspect_ratio = video->sar;
+    output->bit_rate = config->bit_rate;
+    /* As MediaCodec was told: limited range BT.601, PAL's or NTSC's. */
+    output->color_range = AVCOL_RANGE_MPEG;
+    output->color_primaries = pal ? AVCOL_PRI_BT470BG : AVCOL_PRI_SMPTE170M;
+    output->color_space = pal ? AVCOL_SPC_BT470BG : AVCOL_SPC_SMPTE170M;
+    output->color_trc = AVCOL_TRC_SMPTE170M;
+    video->encoder_format = config->color_format == DR_COLOR_FORMAT_I420 ? AV_PIX_FMT_YUV420P : AV_PIX_FMT_NV12;
+    /* MediaCodec's microseconds. */
+    video->time_base = AV_TIME_BASE_Q;
+    return 0;
+}
+#endif
+
+static int open_encoder(dr_video *video, const dr_video_config *config, int global_header, char *error, size_t error_size) {
+    int mediacodec = strcmp(config->encoder, HEVC_MEDIACODEC) == 0 || strcmp(config->encoder, H264_MEDIACODEC) == 0;
+    int result;
+    if (mediacodec) {
+#ifdef __ANDROID__
+        result = open_mediacodec(video, config, error, error_size);
+#else
+        dr_set_error(error, error_size, "This build has no encoder %s", config->encoder);
+        result = AVERROR_ENCODER_NOT_FOUND;
+#endif
+    } else {
+        result = open_ffmpeg_encoder(video, config, global_header, error, error_size);
+    }
+    if (result >= 0) {
+        dr_logf(&video->logger, DR_LOG_INFO, "Encoding %dx%d %s at %d/%d fps with %s%s%s at %lld kbit/s", video->width,
+                video->height, av_get_pix_fmt_name(video->encoder_format), video->frame_rate.num, video->frame_rate.den,
+                config->encoder, config->component != NULL ? " " : "", config->component != NULL ? config->component : "",
+                (long long) (config->bit_rate / 1000));
+    }
+    return result;
+}
+
 /* hevc_metadata or h264_metadata, set to write the sample aspect ratio into every SPS. */
 static int open_bitstream_filter(dr_video *video, char *error, size_t error_size) {
-    const char *name = video->encoder->codec_id == AV_CODEC_ID_HEVC ? "hevc_metadata"
-                       : video->encoder->codec_id == AV_CODEC_ID_H264 ? "h264_metadata" : NULL;
+    const char *name = video->output->codec_id == AV_CODEC_ID_HEVC ? "hevc_metadata"
+                       : video->output->codec_id == AV_CODEC_ID_H264 ? "h264_metadata" : NULL;
     if (name == NULL) return 0;
     const AVBitStreamFilter *filter = av_bsf_get_by_name(name);
     if (filter == NULL) {
@@ -177,9 +254,9 @@ static int open_bitstream_filter(dr_video *video, char *error, size_t error_size
     }
     int result = av_bsf_alloc(filter, &video->bitstream);
     if (result < 0) return result;
-    result = avcodec_parameters_from_context(video->bitstream->par_in, video->encoder);
+    result = avcodec_parameters_copy(video->bitstream->par_in, video->output);
     if (result >= 0) {
-        video->bitstream->time_base_in = video->encoder->time_base;
+        video->bitstream->time_base_in = video->time_base;
         result = av_opt_set_q(video->bitstream->priv_data, "sample_aspect_ratio", video->sar, 0);
     }
     if (result >= 0) result = av_bsf_init(video->bitstream);
@@ -196,6 +273,7 @@ int dr_video_open(dr_video **out, const AVStream *in, const dr_video_config *con
     video->width = in->codecpar->width;
     video->height = in->codecpar->height;
     video->input_time_base = in->time_base;
+    video->frame_rate = frame_rate_of(in);
     video->last_pts = AV_NOPTS_VALUE;
     /* A title can open with a part at half resolution (a logo, say) before the film: the IFO
        then tells the size of the rest. A small difference (704 against 720) is left alone. */
@@ -226,7 +304,7 @@ int dr_video_open(dr_video **out, const AVStream *in, const dr_video_config *con
     int result = video->decoded != NULL && video->filtered != NULL && video->encoded != NULL && video->rewritten != NULL
                  ? 0 : AVERROR(ENOMEM);
     if (result >= 0) result = open_decoder(video, in, error, error_size);
-    if (result >= 0) result = open_encoder(video, in, config, global_header, error, error_size);
+    if (result >= 0) result = open_encoder(video, config, global_header, error, error_size);
     if (result >= 0) result = open_bitstream_filter(video, error, error_size);
     if (result < 0) {
         dr_video_close(video);
@@ -237,13 +315,12 @@ int dr_video_open(dr_video **out, const AVStream *in, const dr_video_config *con
 }
 
 int dr_video_describe(const dr_video *video, AVStream *out) {
-    int result = video->bitstream != NULL ? avcodec_parameters_copy(out->codecpar, video->bitstream->par_out)
-                                          : avcodec_parameters_from_context(out->codecpar, video->encoder);
+    int result = avcodec_parameters_copy(out->codecpar, video->bitstream != NULL ? video->bitstream->par_out : video->output);
     if (result < 0) return result;
     out->codecpar->sample_aspect_ratio = video->sar;
-    out->time_base = video->encoder->time_base;
+    out->time_base = video->time_base;
     out->sample_aspect_ratio = video->sar;
-    out->avg_frame_rate = video->encoder->framerate;
+    out->avg_frame_rate = video->frame_rate;
     return 0;
 }
 
@@ -278,8 +355,40 @@ static int drain_encoder(dr_video *video, dr_video_emit emit, void *opaque) {
     }
 }
 
+#ifdef __ANDROID__
+/* Where MediaCodec's packets go: through deliver to emit. */
+typedef struct delivery {
+    dr_video *video;
+    dr_video_emit emit;
+    void *opaque;
+} delivery;
+
+static int deliver_mediacodec(void *opaque, const uint8_t *data, size_t size, int64_t pts_us, int64_t dts_us, int key) {
+    delivery *to = opaque;
+    AVPacket *packet = to->video->encoded;
+    int result = av_new_packet(packet, (int) size);
+    if (result < 0) return result;
+    memcpy(packet->data, data, size);
+    packet->pts = pts_us;
+    packet->dts = dts_us;
+    if (key) packet->flags |= AV_PKT_FLAG_KEY;
+    result = deliver(to->video, packet, to->emit, to->opaque);
+    av_packet_unref(packet);
+    return result;
+}
+#endif
+
 /* Sends a frame, or NULL at the end, and passes on what the encoder has ready. */
 static int encode(dr_video *video, AVFrame *frame, dr_video_emit emit, void *opaque) {
+#ifdef __ANDROID__
+    if (video->mediacodec != NULL) {
+        delivery to = {video, emit, opaque};
+        if (frame == NULL) return dr_mediacodec_finish(video->mediacodec, deliver_mediacodec, &to);
+        int result = dr_mediacodec_send(video->mediacodec, frame, frame->pts, deliver_mediacodec, &to);
+        if (result >= 0) video->frames++;
+        return result;
+    }
+#endif
     for (;;) {
         int result = avcodec_send_frame(video->encoder, frame);
         if (result == AVERROR(EAGAIN)) {
@@ -300,7 +409,7 @@ static int drain_filters(dr_video *video, dr_video_emit emit, void *opaque) {
         if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) return 0;
         if (result < 0) return result;
         AVFrame *frame = video->filtered;
-        frame->pts = av_rescale_q(frame->pts, av_buffersink_get_time_base(video->sink), video->encoder->time_base);
+        frame->pts = av_rescale_q(frame->pts, av_buffersink_get_time_base(video->sink), video->time_base);
         /* Rounding to the encoder's ticks must not put two frames at one time. */
         if (video->last_pts != AV_NOPTS_VALUE && frame->pts <= video->last_pts) frame->pts = video->last_pts + 1;
         video->last_pts = frame->pts;
@@ -353,7 +462,7 @@ static int open_graph(dr_video *video, const AVFrame *frame) {
     char description[256];
     snprintf(description, sizeof(description),
              "yadif=mode=send_frame:parity=auto:deint=interlaced,scale=w=%d:h=%d,setsar=sar=%d/%d,format=pix_fmts=%s",
-             video->width, video->height, video->sar.num, video->sar.den, av_get_pix_fmt_name(video->encoder->pix_fmt));
+             video->width, video->height, video->sar.num, video->sar.den, av_get_pix_fmt_name(video->encoder_format));
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs = avfilter_inout_alloc();
     if (outputs == NULL || inputs == NULL) {
@@ -456,6 +565,10 @@ void dr_video_close(dr_video *video) {
     av_bsf_free(&video->bitstream);
     avcodec_free_context(&video->decoder);
     avcodec_free_context(&video->encoder);
+#ifdef __ANDROID__
+    dr_mediacodec_close(video->mediacodec);
+#endif
+    avcodec_parameters_free(&video->output);
     av_frame_free(&video->decoded);
     av_frame_free(&video->filtered);
     av_packet_free(&video->encoded);

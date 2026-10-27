@@ -574,8 +574,9 @@ static void release_tracks(JNIEnv *env, jintArray ids, jintArray flags, track_ar
 /*
  * Rips a title to output_file when given, else to output_fd; both stay the caller's. Tracks are
  * given in output order, as parallel arrays: stream id, DR_TRACK_ flags, language (ISO 639-2/B)
- * and name, the last two possibly null. With video_encoder the video is re-encoded (the lossy
- * presets) by that FFmpeg encoder, on the MediaCodec component video_component.
+ * and name, the last two possibly null. With video_encoder ("hevc_mediacodec" or
+ * "h264_mediacodec") the video is re-encoded for the lossy presets by the MediaCodec component
+ * video_component, which takes frames in colour format video_color_format.
  */
 JNIEXPORT jbyteArray JNICALL
 Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint title, jint angle,
@@ -585,7 +586,7 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
                                   jbyteArray movie_title, jbyteArray release_date, jobjectArray tag_keys,
                                   jobjectArray tag_values, jobjectArray chapter_names, jbyteArray video_encoder,
                                   jbyteArray video_component, jlong video_bit_rate, jbyteArray video_bitrate_mode,
-                                  jint output_fd, jobject output_file, jobject listener) {
+                                  jint video_color_format, jint output_fd, jobject output_file, jobject listener) {
     (void) clazz;
     session *s = session_of(handle);
     atomic_store(&s->cancel, 0);
@@ -653,6 +654,7 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
             .output = output_file != NULL ? java_file_as_file(&output) : dr_fd_as_file(output_fd),
             .video_encoder = encoder,
             .video_component = component,
+            .video_color_format = video_color_format,
             .video_bit_rate = video_bit_rate,
             .video_bitrate_mode = bitrate_mode,
         };
