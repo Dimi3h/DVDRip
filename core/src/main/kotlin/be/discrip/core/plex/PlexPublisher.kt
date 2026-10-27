@@ -56,8 +56,11 @@ val PlexException.result: PlexResult
 
 /** What Plex made of a new rip. */
 sealed interface PlexPublication {
-    /** Plex lists the film, under [title]. [scannedFolder] is the folder it was asked to scan, if not the whole library. */
-    data class Added(val title: String, val scannedFolder: String?) : PlexPublication
+    /**
+     * Plex lists the film, under [title]. [scannedFolder] is the folder it was asked to scan, if
+     * not the whole library; [link] opens the film in Plex Web, when the server said who it is.
+     */
+    data class Added(val title: String, val scannedFolder: String?, val link: String? = null) : PlexPublication
 
     /** Plex was asked to scan but did not list the film in time: it is still busy, or the file is outside the library. */
     data class NotSeen(val scannedFolder: String?) : PlexPublication
@@ -90,11 +93,21 @@ class PlexPublisher(
         val folder = PlexPaths.serverFolder(section.locations, share, folderSegments)
         if (folder != null) {
             client.refresh(serverUrl, token, sectionKey, folder)
-            waitFor(serverUrl, token, sectionKey, fileName, waitMillis / 2)?.let { return PlexPublication.Added(it.title, folder) }
+            waitFor(serverUrl, token, sectionKey, fileName, waitMillis / 2)?.let { return added(serverUrl, token, it, folder) }
         }
         client.refresh(serverUrl, token, sectionKey)
         val item = waitFor(serverUrl, token, sectionKey, fileName, if (folder != null) waitMillis / 2 else waitMillis)
-        return if (item != null) PlexPublication.Added(item.title, null) else PlexPublication.NotSeen(folder)
+        return if (item != null) added(serverUrl, token, item, null) else PlexPublication.NotSeen(folder)
+    }
+
+    /** The film was found; the link to it is a nicety, so a failure to make one is no failure. */
+    private suspend fun added(serverUrl: String, token: String, item: PlexItem, folder: String?): PlexPublication.Added {
+        val link = try {
+            PlexClient.webLink(serverUrl, client.machineIdentifier(serverUrl, token), item.ratingKey)
+        } catch (e: PlexException) {
+            null
+        }
+        return PlexPublication.Added(item.title, folder, link)
     }
 
     private suspend fun waitFor(serverUrl: String, token: String, sectionKey: String, fileName: String, millis: Long): PlexItem? {

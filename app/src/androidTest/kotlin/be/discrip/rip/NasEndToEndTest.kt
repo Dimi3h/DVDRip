@@ -98,11 +98,13 @@ class NasEndToEndTest {
 
         val folder = "/volume1/${argument("smbShare")}/${path.relativeFolder}"
         assertEquals(listOf<String?>(folder), refreshed)
-        assertEquals(PlexOutcome.Published(PlexPublication.Added(path.folderName, folder)), done.plex)
+        val link = "${plex.url("/")}web/index.html#!/server/f00d/details?key=%2Flibrary%2Fmetadata%2F${path.folderName.hashCode()}"
+        assertEquals(PlexOutcome.Published(PlexPublication.Added(path.folderName, folder, link)), done.plex)
 
         val record = rig.history.load().single()
         assertEquals((done.nas as NasOutcome.Stored).location, record.nasFile)
         assertEquals(PlexResult.ADDED, record.plex)
+        assertEquals(link, record.plexLink)
         assertNull(record.pendingUpload)
 
         // The engine reads the file back over SMB as well.
@@ -219,6 +221,7 @@ class NasEndToEndTest {
                     body = """{"MediaContainer":{"Directory":[{"key":"1","type":"movie","title":"Films",
                         "Location":[{"path":"/volume1/${argument("smbShare")}/Films"}]}]}}""",
                 )
+                path == "/identity" -> MockResponse(body = """{"MediaContainer":{"machineIdentifier":"f00d"}}""")
                 path == "/library/sections/1/refresh" -> {
                     refreshed += request.url.queryParameter("path")
                     MockResponse()

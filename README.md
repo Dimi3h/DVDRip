@@ -137,8 +137,10 @@ authentication, comes in phase 6 (see "CSS on real drives" below).
   (`nas.local:1445`).
 - **Plex**: after the upload, Plex is asked to scan just the film's folder, worked out from the
   library's folders as Plex sees them (`/volume1/video/Films`); the app waits until the library
-  lists the file. A rejected token, a library that is gone or a film that does not show up are
-  named on the result screen; "Niet wachten op Plex" stops waiting.
+  lists the file and then shows "Toegevoegd aan Plex" with "Openen in Plex", a link to the film in
+  Plex Web on the server. A rejected token, a library that is gone or a film that does not show up
+  are named on the result screen; "Niet wachten op Plex" stops waiting.
+- **Rip screen**: the phases ("Lezen en muxen › Uploaden › Plex") with the current one marked.
 - **Result**: where the file is (local folder, `smb://nas/share/…`) and what Plex made of it.
 - **History** (tab "Geschiedenis"): every rip with date, disc, size, target, result, unreadable
   sectors and notes. A rip whose upload failed waits in the app's storage (or, for Beide, in the

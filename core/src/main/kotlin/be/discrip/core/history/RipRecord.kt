@@ -43,6 +43,8 @@ data class RipRecord(
     val nasProblem: NasProblem? = null,
     /** What Plex made of it; null when Plex was not asked. */
     val plex: PlexResult? = null,
+    /** The film in Plex Web, once Plex listed it. */
+    val plexLink: String? = null,
     /** A finished rip whose upload failed, to try again: in the app's storage or the local folder. */
     val pendingUpload: PendingUpload? = null,
 )

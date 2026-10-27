@@ -14,7 +14,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +74,7 @@ fun RipScreen(container: AppContainer, backLabel: String, onBack: () -> Unit, on
             RipState.Idle -> Unit
             is RipState.Running -> {
                 JobHeader(rip.job)
+                PhaseLine(rip)
                 when (rip.stage) {
                     RipStage.PREPARING -> GroupedSection(header = stringResource(R.string.rip_progress_header)) {
                         row { BusyRow(stringResource(R.string.rip_stage_preparing)) }
@@ -240,6 +245,7 @@ private fun UploadContent(rip: RipState.Running) {
 @Composable
 private fun DeliveryContent(rip: RipState.Succeeded) {
     val colors = HigTheme.colors
+    val uriHandler = LocalUriHandler.current
     GroupedSection(header = stringResource(R.string.rip_saved_header)) {
         rip.localFile?.let { row { DetailRow(stringResource(R.string.rip_saved_local), it) } }
         when (val nas = rip.nas) {
@@ -259,8 +265,37 @@ private fun DeliveryContent(rip: RipState.Succeeded) {
         rip.plex?.let { plex ->
             val problem = plex !is PlexOutcome.Published || plex.publication !is PlexPublication.Added
             row { DetailRow(stringResource(R.string.rip_saved_plex), plexText(plex), if (problem) colors.orange else null) }
+            plex.link?.let { link ->
+                row { ButtonRow(stringResource(R.string.plex_open), onClick = { uriHandler.openUri(link) }) }
+            }
         }
     }
+}
+
+/** The phases of the job, the current one in the accent colour: "Lezen en muxen › Uploaden › Plex". */
+@Composable
+private fun PhaseLine(rip: RipState.Running) {
+    val colors = HigTheme.colors
+    val destination = rip.job.destination
+    val phases = buildList {
+        add(RipStage.RIPPING to stringResource(R.string.rip_phase_read_mux))
+        if (destination.nas != null && !destination.writesDirectly) add(RipStage.UPLOADING to stringResource(R.string.rip_phase_upload))
+        if (destination.plex != null) add(RipStage.PLEX to stringResource(R.string.rip_phase_plex))
+    }
+    if (phases.size < 2) return
+    val current = phases.indexOfFirst { it.first == rip.stage }.coerceAtLeast(0)
+    val text = buildAnnotatedString {
+        phases.forEachIndexed { index, (_, name) ->
+            if (index > 0) withStyle(SpanStyle(color = colors.tertiaryLabel)) { append(" › ") }
+            val color = when {
+                index < current -> colors.secondaryLabel
+                index == current -> colors.accent
+                else -> colors.tertiaryLabel
+            }
+            withStyle(SpanStyle(color = color, fontWeight = if (index == current) FontWeight.SemiBold else null)) { append(name) }
+        }
+    }
+    Text(text, style = HigTheme.typography.subheadline, modifier = Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, top = 6.dp))
 }
 
 @Composable

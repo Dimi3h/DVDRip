@@ -391,12 +391,12 @@
     <string name="rip_saved_plex">Plex</string>
     <string name="rip_upload_pending">The file waits on the phone; try the upload again from History.</string>
     <string name="rip_upload_cancelled">Upload stopped.</string>
-    <string name="rip_plex_added">In the library as %1$s.</string>
+    <string name="rip_plex_added">Added to Plex as %1$s.</string>
     <string name="rip_plex_not_seen">Plex has not listed the film yet. It may still be scanning, or the NAS folder is not part of the library.</string>
     <string name="rip_plex_section_missing">The Plex library is gone. Choose it again in Settings › Plex.</string>
     <string name="rip_plex_not_awaited">Plex is scanning the folder; the app did not wait for it.</string>
     <string name="rip_plex_token">Plex rejects the token. Renew it in Settings › Plex.</string>
-    <string name="plex_result_added">In the library.</string>
+    <string name="plex_result_added">Added to Plex.</string>
     <string name="rip_failure_no_app_space">There is not enough space in the app\'s storage for the rip before its upload.</string>
     <string name="rip_failure_app_write_failed">Writing to the app\'s storage failed.</string>
     <string name="rip_failure_no_space_numbers_nas">The rip needs about %1$s on the NAS and %2$s is free.</string>
@@ -423,4 +423,8 @@
     <string name="rip_upload_pending_local">The copy in the local folder stays; upload it again from History.</string>
     <string name="history_pending_local_footer">The upload to the NAS failed; the copy in the local folder can be uploaded again.</string>
     <string name="history_skip_upload">Don\'t Upload</string>
+    <string name="plex_open">Open in Plex</string>
+    <string name="rip_phase_read_mux">Reading and muxing</string>
+    <string name="rip_phase_upload">Uploading</string>
+    <string name="rip_phase_plex">Plex</string>
 </resources>

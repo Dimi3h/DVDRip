@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -93,6 +94,7 @@ fun HistoryScreen(container: AppContainer, bottomPadding: Dp) {
 private fun RecordSheet(container: AppContainer, record: RipRecord, retry: Retry?, onClose: () -> Unit) {
     val locale = currentLocale()
     val colors = HigTheme.colors
+    val uriHandler = LocalUriHandler.current
     val busy = retry?.recordId == record.id
     HigSheet(
         title = filmName(record),
@@ -153,6 +155,9 @@ private fun RecordSheet(container: AppContainer, record: RipRecord, retry: Retry
                             if (plex == PlexResult.ADDED) null else colors.orange,
                         )
                     }
+                }
+                record.plexLink?.let { link ->
+                    row { ButtonRow(stringResource(R.string.plex_open), onClick = { uriHandler.openUri(link) }) }
                 }
             }
         }

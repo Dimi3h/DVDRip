@@ -81,6 +81,7 @@ class PlexPublisherTest {
                             {"key":"1","type":"movie","title":"Films","Location":[{"path":"/volume1/video/Films"}]}]}}""",
                     )
                     path.endsWith("/refresh") -> MockResponse()
+                    path == "/identity" -> MockResponse(body = """{"MediaContainer":{"size":0,"machineIdentifier":"f00d"}}""")
                     path == "/library/sections/1/all" -> {
                         val answer = recent.first()
                         if (recent.size > 1) recent = recent.drop(1)
@@ -110,12 +111,19 @@ class PlexPublisherTest {
 
         val result = publisher.publish(url, "token", "1", "video", folder, fileName)
 
-        assertEquals(PlexPublication.Added("Testfilm", "/volume1/video/Films/Testfilm (2024) {tmdb-603}"), result)
+        assertEquals(
+            PlexPublication.Added(
+                "Testfilm",
+                "/volume1/video/Films/Testfilm (2024) {tmdb-603}",
+                "${url}web/index.html#!/server/f00d/details?key=%2Flibrary%2Fmetadata%2F7",
+            ),
+            result,
+        )
         val refresh = refreshes().single()
         assertEquals("/library/sections/1/refresh", refresh.url.encodedPath)
         assertEquals("/volume1/video/Films/Testfilm (2024) {tmdb-603}", refresh.url.queryParameter("path"))
         assertEquals("token", refresh.headers["X-Plex-Token"])
-        val listing = requests.last()
+        val listing = requests.last { it.url.encodedPath.endsWith("/all") }
         assertEquals("addedAt:desc", listing.url.queryParameter("sort"))
     }
 
@@ -125,7 +133,8 @@ class PlexPublisherTest {
 
         val result = publisher.publish(url, "token", "1", "video", folder, fileName)
 
-        assertEquals(PlexPublication.Added("Testfilm", null), result)
+        assertEquals("Testfilm", (result as PlexPublication.Added).title)
+        assertNull(result.scannedFolder)
         assertEquals(listOf("/volume1/video/Films/Testfilm (2024) {tmdb-603}", null), refreshes().map { it.url.queryParameter("path") })
     }
 

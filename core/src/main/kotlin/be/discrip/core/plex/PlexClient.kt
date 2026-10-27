@@ -10,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.net.URLEncoder
 
 /** A library section on the Plex server (`/library/sections`). */
 data class PlexSection(
@@ -62,6 +63,13 @@ class PlexClient(private val http: OkHttpClient) {
     suspend fun refresh(serverUrl: String, token: String, sectionKey: String, folder: String? = null) {
         val query = if (folder != null) mapOf("path" to folder) else emptyMap()
         call(serverUrl, token, listOf("library", "sections", sectionKey, "refresh"), query)
+    }
+
+    /** The server's machine identifier, which links into Plex Web need. */
+    suspend fun machineIdentifier(serverUrl: String, token: String): String {
+        val identifier = get<IdentityResponseDto>(serverUrl, token, listOf("identity")).container.machineIdentifier
+        if (identifier.isBlank()) throw PlexException.BadResponse(IllegalStateException("No machineIdentifier"))
+        return identifier
     }
 
     /** The [count] items most recently added to library section [sectionKey], newest first. */
@@ -139,6 +147,14 @@ class PlexClient(private val http: OkHttpClient) {
          * Accepts `192.168.1.10`, `nas.local:32400` or a full `http(s)://` URL. Without a scheme,
          * plain HTTP and Plex's default port 32400 are assumed.
          */
+        /** Plex Web on the server itself, open at the item [ratingKey]; null for an unusable [serverUrl]. */
+        fun webLink(serverUrl: String, machineIdentifier: String, ratingKey: String): String? {
+            val base = normalizeServerUrl(serverUrl) ?: return null
+            val web = base.newBuilder().addPathSegment("web").addPathSegment("index.html").build()
+            val key = URLEncoder.encode("/library/metadata/$ratingKey", "UTF-8")
+            return "$web#!/server/$machineIdentifier/details?key=$key"
+        }
+
         fun normalizeServerUrl(input: String): HttpUrl? {
             val trimmed = input.trim().trimEnd('/')
             if (trimmed.isEmpty()) return null
@@ -179,6 +195,16 @@ internal data class DirectoryDto(
 @Serializable
 internal data class LocationDto(
     val path: String = "",
+)
+
+@Serializable
+internal data class IdentityResponseDto(
+    @SerialName("MediaContainer") val container: IdentityDto = IdentityDto(),
+)
+
+@Serializable
+internal data class IdentityDto(
+    val machineIdentifier: String = "",
 )
 
 @Serializable

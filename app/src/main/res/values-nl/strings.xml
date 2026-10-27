@@ -389,12 +389,12 @@
     <string name="rip_saved_plex">Plex</string>
     <string name="rip_upload_pending">Het bestand wacht op de telefoon; probeer de upload opnieuw vanuit Geschiedenis.</string>
     <string name="rip_upload_cancelled">Upload gestopt.</string>
-    <string name="rip_plex_added">In de bibliotheek als %1$s.</string>
+    <string name="rip_plex_added">Toegevoegd aan Plex als %1$s.</string>
     <string name="rip_plex_not_seen">Plex toont de film nog niet. Misschien scant Plex nog, of de NAS-map hoort niet bij de bibliotheek.</string>
     <string name="rip_plex_section_missing">De Plex-bibliotheek bestaat niet meer. Kies ze opnieuw in Instellingen › Plex.</string>
     <string name="rip_plex_not_awaited">Plex scant de map; de app heeft niet op het resultaat gewacht.</string>
     <string name="rip_plex_token">Plex weigert het token. Vernieuw het in Instellingen › Plex.</string>
-    <string name="plex_result_added">In de bibliotheek.</string>
+    <string name="plex_result_added">Toegevoegd aan Plex.</string>
     <string name="rip_failure_no_app_space">Er is niet genoeg ruimte in de opslag van de app voor de rip vóór de upload.</string>
     <string name="rip_failure_app_write_failed">Schrijven naar de opslag van de app is mislukt.</string>
     <string name="rip_failure_no_space_numbers_nas">De rip heeft ongeveer %1$s nodig op de NAS en er is %2$s vrij.</string>
@@ -421,4 +421,8 @@
     <string name="rip_upload_pending_local">De kopie in de lokale map blijft; upload ze opnieuw vanuit Geschiedenis.</string>
     <string name="history_pending_local_footer">De upload naar de NAS is mislukt; de kopie in de lokale map kan opnieuw geüpload worden.</string>
     <string name="history_skip_upload">Niet uploaden</string>
+    <string name="plex_open">Openen in Plex</string>
+    <string name="rip_phase_read_mux">Lezen en muxen</string>
+    <string name="rip_phase_upload">Uploaden</string>
+    <string name="rip_phase_plex">Plex</string>
 </resources>

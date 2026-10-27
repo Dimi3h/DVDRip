@@ -72,6 +72,18 @@ class PlexClientTest {
     }
 
     @Test
+    fun `links into Plex Web on the server itself`() {
+        assertEquals(
+            "http://192.168.1.10:32400/web/index.html#!/server/f00d/details?key=%2Flibrary%2Fmetadata%2F42",
+            PlexClient.webLink("192.168.1.10", "f00d", "42"),
+        )
+        assertEquals(
+            "https://plex.example/plex/web/index.html#!/server/f00d/details?key=%2Flibrary%2Fmetadata%2F42",
+            PlexClient.webLink("https://plex.example/plex/", "f00d", "42"),
+        )
+    }
+
+    @Test
     fun `missing token and bad url fail before any request`() = runTest {
         assertFailsWith<PlexException.MissingToken> { client.librarySections(baseUrl, " ") }
         assertFailsWith<PlexException.InvalidUrl> { client.librarySections("not a url !!", "token") }

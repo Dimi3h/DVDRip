@@ -166,6 +166,9 @@ sealed interface PlexOutcome {
             NotAwaited -> PlexResult.NOT_SEEN
             is Failed -> reason
         }
+
+    /** The film in Plex Web, when Plex listed it. */
+    val link: String? get() = ((this as? Published)?.publication as? PlexPublication.Added)?.link
 }
 
 sealed interface RipState {
@@ -380,7 +383,13 @@ class RipManager(
                 }
                 history.update(record.id) { old ->
                     when (nas) {
-                        is NasOutcome.Stored -> old.copy(nasFile = nas.location, nasProblem = null, pendingUpload = null, plex = plexOutcome?.result ?: old.plex)
+                        is NasOutcome.Stored -> old.copy(
+                            nasFile = nas.location,
+                            nasProblem = null,
+                            pendingUpload = null,
+                            plex = plexOutcome?.result ?: old.plex,
+                            plexLink = plexOutcome?.link ?: old.plexLink,
+                        )
                         is NasOutcome.Failed -> old.copy(nasProblem = nas.problem)
                         NasOutcome.Cancelled -> old
                     }
@@ -657,6 +666,7 @@ class RipManager(
                 nasFile = (state.nas as? NasOutcome.Stored)?.location,
                 nasProblem = (state.nas as? NasOutcome.Failed)?.problem,
                 plex = state.plex?.result,
+                plexLink = state.plex?.link,
                 pendingUpload = pending,
             )
             is RipState.Failed -> base.copy(
