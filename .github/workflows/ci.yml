@@ -39,10 +39,12 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+      # man-db rebuilds its index after every install, which takes many minutes on the runners.
       - name: Install the tools for the test DVD
         run: |
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg dvdauthor genisoimage ninja-build nasm
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg dvdauthor genisoimage ninja-build nasm
       # The scripts keep a fingerprint, so a restored build that no longer matches is rebuilt.
       - name: Cache third-party sources and the host FFmpeg build
         uses: actions/cache@v6
@@ -110,10 +112,12 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
+      # man-db rebuilds its index after every install, which takes many minutes on the runners.
       - name: Install the tools for the test DVD
         run: |
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg dvdauthor genisoimage
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg dvdauthor genisoimage
       - name: Cache third-party sources and the Android FFmpeg build
         uses: actions/cache@v6
         with:
