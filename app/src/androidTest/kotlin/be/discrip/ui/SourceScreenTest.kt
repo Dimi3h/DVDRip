@@ -1,9 +1,12 @@
 package be.discrip.ui
 
 import android.net.Uri
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import be.discrip.DiscRipApplication
@@ -45,7 +48,7 @@ class SourceScreenTest {
     }
 
     @Test
-    fun listsTheTitlesWithTheMainFeatureChosenAndTheAudioInOutputOrder() {
+    fun listsTheTitlesWithTheMainFeatureChosenAndTheTracksInOutputOrder() {
         compose.setContent {
             HigTheme {
                 SourceScreen(
@@ -63,12 +66,20 @@ class SourceScreenTest {
 
         compose.onNodeWithText("DISCRIP_TEST_DVD").assertExists()
         compose.onNodeWithText("0:12 · 3 chapters · 2 audio tracks").assertExists()
-        compose.onNodeWithText("0:03 · 1 chapter · 2 audio tracks").assertExists()
         compose.onNodeWithText("Main feature").assertExists()
-        compose.onNodeWithText("Dutch").assertExists()
+        // Title 2 is three seconds long: hidden until all titles are shown.
+        compose.onNodeWithText("0:03 · 1 chapter · 2 audio tracks").assertDoesNotExist()
+        compose.onNodeWithText("Show all 2 titles").performClick()
+        compose.onNodeWithText("0:03 · 1 chapter · 2 audio tracks").assertExists()
+
+        // Audio and subtitles, Dutch first; the Dutch audio is the default track, so "Dutch" also
+        // shows on the default track row.
+        compose.onAllNodesWithText("Dutch").assertCountEquals(3)
+        compose.onAllNodesWithText("English").assertCountEquals(2)
+        compose.onNodeWithText("Default track").assertExists()
         compose.onNodeWithText("LPCM 2.0").assertExists()
-        compose.onNodeWithText("English").assertExists()
         compose.onNodeWithText("Dolby Digital 2.0").assertExists()
+        compose.onNodeWithText("Default").assertExists()
         compose.onNodeWithText("Choose metadata").assertExists()
     }
 }

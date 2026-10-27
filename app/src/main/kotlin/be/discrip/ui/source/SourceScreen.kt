@@ -1,6 +1,5 @@
 package be.discrip.ui.source
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
@@ -20,6 +19,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import be.discrip.AppContainer
 import be.discrip.R
 import be.discrip.core.dvd.DvdTitle
+import be.discrip.core.dvd.MainFeature
+import be.discrip.core.dvd.RipPlanning
 import be.discrip.core.format.Formats
 import be.discrip.core.model.QualityPreset
 import be.discrip.rip.DvdSource
@@ -35,13 +36,17 @@ import be.discrip.ui.components.FilledButton
 import be.discrip.ui.components.GroupedSection
 import be.discrip.ui.components.HigAlert
 import be.discrip.ui.components.HigScaffold
+import be.discrip.ui.components.HigSheet
 import be.discrip.ui.components.NavigationRow
 import be.discrip.ui.components.RowFrame
 import be.discrip.ui.components.ValueRow
 import be.discrip.ui.components.rememberHaptics
-import be.discrip.ui.rip.trackFormat
-import be.discrip.ui.rip.trackTitle
+import be.discrip.ui.rip.audioFormat
+import be.discrip.ui.rip.audioTitle
+import be.discrip.ui.rip.subtitleKind
+import be.discrip.ui.rip.subtitleTitle
 import be.discrip.ui.settings.FolderAccess
+import be.discrip.ui.settings.currentLocale
 import be.discrip.ui.shortLabelRes
 import be.discrip.ui.theme.HigTheme
 import kotlinx.coroutines.launch
@@ -62,9 +67,10 @@ fun SourceScreen(
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     var replace by remember { mutableStateOf<RipJob?>(null) }
+    var choosingDefault by remember { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
-        viewModel.refreshFolderAccess()
+        viewModel.refreshFolder()
         onPauseOrDispose { }
     }
 
@@ -75,7 +81,7 @@ fun SourceScreen(
             when (val check = viewModel.prepareStart()) {
                 StartCheck.NeedsMetadata -> onOpenMetadata(ready?.name)
                 StartCheck.NeedsFolder -> onOpenStorageSettings()
-                StartCheck.Busy -> haptics.failure()
+                StartCheck.NotEnoughSpace, StartCheck.Busy -> haptics.failure()
                 is StartCheck.Exists -> replace = check.job
                 is StartCheck.Ready -> if (viewModel.start(check.job)) {
                     haptics.success()
@@ -101,8 +107,20 @@ fun SourceScreen(
                     row { ButtonRow(stringResource(R.string.action_retry), onClick = viewModel::retry) }
                 }
             }
-            is SourceState.Ready -> ReadyContent(current, dvd, viewModel, onOpenMetadata, onOpenStorageSettings, start)
+            is SourceState.Ready -> ReadyContent(
+                state = current,
+                dvd = dvd,
+                viewModel = viewModel,
+                onOpenMetadata = onOpenMetadata,
+                onOpenStorageSettings = onOpenStorageSettings,
+                onChooseDefault = { choosingDefault = true },
+                start = start,
+            )
         }
+    }
+
+    if (choosingDefault && current != null) {
+        DefaultAudioSheet(current, viewModel, onClose = { choosingDefault = false })
     }
 
     replace?.let { job ->
@@ -131,25 +149,13 @@ private fun ReadyContent(
     viewModel: SourceViewModel,
     onOpenMetadata: (String?) -> Unit,
     onOpenStorageSettings: () -> Unit,
+    onChooseDefault: () -> Unit,
     start: () -> Unit,
 ) {
     val colors = HigTheme.colors
     val chosen = state.title
-    val main = dvd.mainTitle
 
-    GroupedSection(header = stringResource(R.string.source_titles_header), footer = stringResource(R.string.source_titles_footer)) {
-        for (title in dvd.titles) {
-            row {
-                CheckRow(
-                    title = stringResource(R.string.source_title_name, title.number),
-                    subtitle = titleDetails(title),
-                    checked = title.number == chosen?.number,
-                    onClick = { viewModel.select(title.number) },
-                    trailingText = if (title.number == main?.number) stringResource(R.string.source_main_title) else null,
-                )
-            }
-        }
-    }
+    TitlesSection(state, dvd, viewModel)
 
     val metadata = state.metadata
     GroupedSection(header = stringResource(R.string.source_metadata_header)) {
@@ -163,46 +169,11 @@ private fun ReadyContent(
     }
 
     if (chosen != null) {
-        val tracks = state.audio
-        GroupedSection(
-            header = stringResource(R.string.source_audio_header),
-            footer = if (tracks.isEmpty()) stringResource(R.string.source_audio_none) else stringResource(R.string.source_audio_footer),
-        ) {
-            for (track in tracks) {
-                row {
-                    RowFrame {
-                        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                            Text(trackTitle(track), style = HigTheme.typography.body, color = colors.label)
-                            Text(trackFormat(track, state.settings.convertLpcmToFlac), style = HigTheme.typography.subheadline, color = colors.secondaryLabel)
-                        }
-                        if (track.isDefault) {
-                            Text(stringResource(R.string.source_default_track), style = HigTheme.typography.subheadline, color = colors.secondaryLabel)
-                        }
-                    }
-                }
-            }
-        }
+        AudioSection(state, chosen, viewModel, onChooseDefault)
+        SubtitlesSection(state, chosen, viewModel)
     }
 
-    val path = state.path
-    val folderFooter = when (state.folderAccess) {
-        FolderAccess.GRANTED -> state.settings.local.displayName?.let { stringResource(R.string.source_output_footer, it) }
-        FolderAccess.REVOKED -> stringResource(R.string.source_folder_revoked)
-        FolderAccess.NONE -> stringResource(R.string.source_needs_folder)
-    }
-    GroupedSection(
-        header = stringResource(R.string.source_output_header),
-        footer = folderFooter,
-        footerColor = if (state.folderAccess == FolderAccess.GRANTED) null else colors.orange,
-    ) {
-        if (path != null) {
-            row { ValueRow(stringResource(R.string.source_output_folder), path.relativeFolder) }
-            row { ValueRow(stringResource(R.string.source_output_name), path.fileName) }
-        }
-        if (state.folderAccess != FolderAccess.GRANTED) {
-            row { NavigationRow(stringResource(R.string.action_open_settings), onClick = onOpenStorageSettings) }
-        }
-    }
+    OutputSection(state, onOpenStorageSettings)
 
     GroupedSection(
         footer = if (state.settings.defaultPreset.isLossy) stringResource(R.string.source_quality_lossy_footer) else null,
@@ -213,7 +184,8 @@ private fun ReadyContent(
     FilledButton(
         text = stringResource(if (metadata == null) R.string.source_choose_metadata else R.string.source_start),
         onClick = start,
-        enabled = chosen != null && !state.ripRunning && (metadata == null || state.folderAccess == FolderAccess.GRANTED),
+        enabled = chosen != null && !state.ripRunning &&
+            (metadata == null || (state.folderAccess == FolderAccess.GRANTED && state.enoughSpace)),
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 32.dp),
     )
     if (state.ripRunning) {
@@ -227,11 +199,162 @@ private fun ReadyContent(
 }
 
 @Composable
+private fun TitlesSection(state: SourceUiState, dvd: SourceState.Ready, viewModel: SourceViewModel) {
+    val chosen = state.title
+    val main = dvd.mainTitle
+    GroupedSection(header = stringResource(R.string.source_titles_header), footer = stringResource(R.string.source_titles_footer)) {
+        for (title in state.listedTitles) {
+            row {
+                CheckRow(
+                    title = stringResource(R.string.source_title_name, title.number),
+                    subtitle = titleDetails(title),
+                    checked = title.number == chosen?.number,
+                    onClick = { viewModel.selectTitle(title.number) },
+                    trailingText = if (title.number == main?.number) stringResource(R.string.source_main_title) else null,
+                )
+            }
+        }
+        if (state.hiddenTitleCount > 0) {
+            row {
+                ButtonRow(
+                    text = pluralStringResource(R.plurals.source_show_all_titles, dvd.titles.size, dvd.titles.size),
+                    onClick = { viewModel.setShowAllTitles(true) },
+                )
+            }
+        } else if (state.showAllTitles) {
+            row { ButtonRow(stringResource(R.string.source_show_fewer_titles), onClick = { viewModel.setShowAllTitles(false) }) }
+        }
+    }
+}
+
+@Composable
+private fun AudioSection(state: SourceUiState, title: DvdTitle, viewModel: SourceViewModel, onChooseDefault: () -> Unit) {
+    val selected = state.audio
+    val streams = RipPlanning.orderedAudio(title)
+    GroupedSection(
+        header = stringResource(R.string.source_audio_header),
+        footer = when {
+            streams.isEmpty() -> stringResource(R.string.source_audio_none)
+            selected.isEmpty() -> stringResource(R.string.source_audio_none_chosen)
+            else -> stringResource(R.string.source_audio_footer)
+        },
+    ) {
+        for (stream in streams) {
+            val plan = selected.firstOrNull { it.streamId == stream.streamId }
+            row {
+                CheckRow(
+                    title = audioTitle(stream),
+                    subtitle = audioFormat(stream, state.settings.convertLpcmToFlac),
+                    checked = plan != null,
+                    onClick = { viewModel.toggleAudio(stream.streamId) },
+                    trailingText = if (plan?.isDefault == true) stringResource(R.string.source_default_track) else null,
+                )
+            }
+        }
+        if (selected.size > 1) {
+            val default = title.audio.firstOrNull { stream -> selected.any { it.isDefault && it.streamId == stream.streamId } }
+            row {
+                NavigationRow(
+                    title = stringResource(R.string.source_default_audio),
+                    value = default?.let { audioTitle(it) },
+                    onClick = onChooseDefault,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtitlesSection(state: SourceUiState, title: DvdTitle, viewModel: SourceViewModel) {
+    val streams = RipPlanning.orderedSubtitles(title)
+    if (streams.isEmpty()) return
+    val selected = state.subtitles.map { it.streamId }.toSet()
+    GroupedSection(header = stringResource(R.string.source_subtitles_header), footer = stringResource(R.string.source_subtitles_footer)) {
+        for (stream in streams) {
+            row {
+                CheckRow(
+                    title = subtitleTitle(stream),
+                    subtitle = subtitleKind(stream),
+                    checked = stream.streamId in selected,
+                    onClick = { viewModel.toggleSubtitle(stream.streamId) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OutputSection(state: SourceUiState, onOpenStorageSettings: () -> Unit) {
+    val colors = HigTheme.colors
+    val locale = currentLocale()
+    val path = state.path
+    val estimated = state.estimatedBytes
+    val footer = when {
+        state.folderAccess == FolderAccess.REVOKED -> stringResource(R.string.source_folder_revoked)
+        state.folderAccess == FolderAccess.NONE -> stringResource(R.string.source_needs_folder)
+        !state.enoughSpace -> stringResource(
+            R.string.source_not_enough_space,
+            Formats.bytes(state.neededBytes ?: 0, locale),
+            Formats.bytes(state.freeBytes ?: 0, locale),
+        )
+        else -> state.settings.local.displayName?.let { stringResource(R.string.source_output_footer, it) }
+    }
+    val problem = state.folderAccess != FolderAccess.GRANTED || !state.enoughSpace
+    GroupedSection(header = stringResource(R.string.source_output_header), footer = footer, footerColor = if (problem) colors.orange else null) {
+        if (path != null) {
+            row { ValueRow(stringResource(R.string.source_output_folder), path.relativeFolder) }
+            row { ValueRow(stringResource(R.string.source_output_name), path.fileName) }
+        }
+        if (estimated != null) {
+            row { ValueRow(stringResource(R.string.source_output_size), "≈ " + Formats.bytes(estimated, locale)) }
+        }
+        state.freeBytes?.let { free ->
+            row {
+                ValueRow(
+                    stringResource(R.string.source_output_free),
+                    Formats.bytes(free, locale),
+                    valueColor = if (state.enoughSpace) colors.secondaryLabel else colors.orange,
+                )
+            }
+        }
+        if (state.folderAccess != FolderAccess.GRANTED) {
+            row { NavigationRow(stringResource(R.string.action_open_settings), onClick = onOpenStorageSettings) }
+        }
+    }
+}
+
+@Composable
+private fun DefaultAudioSheet(state: SourceUiState, viewModel: SourceViewModel, onClose: () -> Unit) {
+    HigSheet(
+        title = stringResource(R.string.source_default_audio),
+        onDismissRequest = onClose,
+        doneLabel = stringResource(R.string.action_done),
+        onDone = onClose,
+    ) {
+        val title = state.title
+        GroupedSection(footer = stringResource(R.string.source_default_audio_footer)) {
+            for (track in state.audio) {
+                val stream = title?.audio?.firstOrNull { it.streamId == track.streamId } ?: continue
+                row {
+                    CheckRow(
+                        title = audioTitle(stream),
+                        subtitle = audioFormat(stream, state.settings.convertLpcmToFlac),
+                        checked = track.isDefault,
+                        onClick = { viewModel.setDefaultAudio(track.streamId) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun titleDetails(title: DvdTitle): String = buildList {
     add(Formats.duration(title.durationMs / 1000))
     add(pluralStringResource(R.plurals.source_chapters, title.chapters, title.chapters))
     add(pluralStringResource(R.plurals.source_audio_tracks, title.audio.size, title.audio.size))
     if (title.angles > 1) add(pluralStringResource(R.plurals.source_angles, title.angles, title.angles))
+    if (MainFeature.assess(title).looksScrambled) add(stringResource(R.string.source_title_scrambled))
 }.joinToString(" · ")
 
 private fun problemText(problem: SourceProblem): Int = when (problem) {

@@ -93,6 +93,14 @@ char *dr_probe(int fd) {
             dr_json_int(&json, av_rescale_q(chapter->start, chapter->time_base, (AVRational) {1, 1000}));
         }
         dr_json_end_array(&json);
+        dr_json_key(&json, "tags");
+        dr_json_begin_object(&json);
+        const AVDictionaryEntry *tag = NULL;
+        while ((tag = av_dict_iterate(format->metadata, tag)) != NULL) {
+            dr_json_key(&json, tag->key);
+            dr_json_string(&json, tag->value);
+        }
+        dr_json_end_object(&json);
         dr_json_end_object(&json);
         result = dr_json_take(&json);
     }

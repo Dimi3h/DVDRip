@@ -5,6 +5,7 @@ import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import be.discrip.core.dvd.AudioCodec
+import be.discrip.core.dvd.MainFeature
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.dvd.RipOutcome
 import be.discrip.core.dvd.RipPlanning
@@ -88,6 +89,12 @@ class RipEndToEndTest {
         assertEquals(720 to 576, summary.video.single().width to summary.video.single().height)
         assertEquals(listOf("pcm_s16le", "ac3"), summary.audio.map { it.codec })
         assertEquals(listOf("dut", "eng"), summary.audio.map { it.language })
+        assertEquals(listOf("dvd_subtitle", "dvd_subtitle"), summary.subtitles.map { it.codec })
+        assertEquals(listOf("dut", "eng"), summary.subtitles.map { it.language })
+        assertEquals(2, done.result.subtitleTracks)
+        assertEquals("Testfilm", summary.tags["title"])
+        assertEquals("2024", summary.tags["DATE_RELEASED"])
+        assertEquals("movie/603", summary.tags["TMDB"])
         assertEquals(3, summary.chapterStartsMs.size)
         assertEquals(6000.0, summary.chapterStartsMs[2].toDouble(), 40.0)
         assertEquals(12_000.0, summary.durationMs.toDouble(), 100.0)
@@ -113,12 +120,23 @@ class RipEndToEndTest {
     }
 
     @Test
+    fun aRipThatCannotFitDoesNotStart() = runBlocking {
+        val ready = openImage()
+        assertTrue(manager.start(job(ready, lpcmToFlac = false, estimatedBytes = Long.MAX_VALUE / 4)))
+        val done = withTimeout(RIP_TIMEOUT) { manager.rip.first { it !is RipState.Running } }
+        done as RipState.Failed
+        assertEquals(RipFailure.NO_SPACE, done.reason)
+        assertTrue(done.neededBytes!! > done.freeBytes!!)
+        assertEquals(emptyList<File>(), File(work, "out").walk().filter { it.isFile }.toList())
+    }
+
+    @Test
     fun theEngineStopsWhenCancelledMidRip() = runBlocking {
         manager.close(image)?.join()
         val iso = ParcelFileDescriptor.open(File(work, "test-dvd.iso"), ParcelFileDescriptor.MODE_READ_ONLY)
         DvdSession.configure(target.cacheDir)
         DvdSession.openImage(iso).use { session ->
-            val title = RipPlanning.mainTitle(session.titles())!!
+            val title = MainFeature.choose(session.titles())!!
             val output = File(work, "cancelled.mkv")
             val request = RipRequest(title.number, audio = emptyList(), lpcmToFlac = false, movieTitle = null, releaseDate = null, chapterNames = emptyList())
             var reports = 0
@@ -145,7 +163,7 @@ class RipEndToEndTest {
             assertEquals(imageTitles, titles)
             val output = File(work, "folder.mkv")
             val extra = titles.single { it.number == 2 }
-            val audio = RipPlanning.audioTracks(extra).map { RipAudioTrack(it.streamId, it.language, null, it.isDefault) }
+            val audio = RipPlanning.audioTracks(extra).map { RipTrack(it.streamId, it.language, null, it.flags) }
             val request = RipRequest(2, audio = audio, lpcmToFlac = false, movieTitle = "Extra", releaseDate = null, chapterNames = emptyList())
             ParcelFileDescriptor.open(output, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE).use { file ->
                 val outcome = session.rip(request, file, isCancelled = { false }) { _, _, _, _ -> }
@@ -171,12 +189,24 @@ class RipEndToEndTest {
         return state as SourceState.Ready
     }
 
-    private fun job(ready: SourceState.Ready, lpcmToFlac: Boolean): RipJob {
+    private fun job(ready: SourceState.Ready, lpcmToFlac: Boolean, estimatedBytes: Long = 0): RipJob {
         val title = ready.mainTitle!!
         val metadata = MovieMetadata(title = "Testfilm", year = 2024, tmdbId = 603)
         val audio = RipPlanning.audioTracks(title)
         assertEquals(listOf(AudioCodec.LPCM, AudioCodec.AC3), audio.map { it.codec })
-        return RipJob(image, ready.name, metadata, title, audio, lpcmToFlac, PlexNaming.plan(metadata, "Films"), treeUri = "")
+        val subtitles = RipPlanning.subtitleTracks(title)
+        return RipJob(
+            source = image,
+            sourceName = ready.name,
+            metadata = metadata,
+            title = title,
+            audio = audio,
+            subtitles = subtitles,
+            lpcmToFlac = lpcmToFlac,
+            estimatedBytes = estimatedBytes,
+            path = PlexNaming.plan(metadata, "Films"),
+            treeUri = "",
+        )
     }
 
     private fun copyAsset(name: String, to: File) {

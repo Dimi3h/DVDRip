@@ -19,6 +19,8 @@ data class DvdTitle(
     val audio: List<DvdAudioStream>,
     val subtitles: List<DvdSubtitleStream>,
     val chapterStartsMs: List<Long>,
+    /** The cells in playback order, one angle per angle block. */
+    val playback: List<DvdCell> = emptyList(),
 ) {
     /** Bytes of VOB data the title covers on the disc. */
     val sizeBytes: Long get() = sectors * SECTOR_SIZE
@@ -26,6 +28,12 @@ data class DvdTitle(
     companion object {
         const val SECTOR_SIZE = 2048
     }
+}
+
+/** A cell of a title: sectors relative to the start of its title set's VOBs, and its playing time. */
+@Serializable
+data class DvdCell(val first: Long, val last: Long, val durationMs: Long) {
+    val sectors: Long get() = if (last >= first) last - first + 1 else 0
 }
 
 @Serializable
@@ -79,12 +87,34 @@ data class DvdAudioStream(
     val isCommentary: Boolean get() = purpose == AudioPurpose.COMMENTARY || purpose == AudioPurpose.ALTERNATE_COMMENTARY
 }
 
+/** What a subtitle stream is for, from the IFO's code extension. */
+@Serializable
+enum class SubtitlePurpose {
+    @SerialName("normal") NORMAL,
+    @SerialName("large") LARGE,
+    @SerialName("children") CHILDREN,
+    @SerialName("captions") CAPTIONS,
+    @SerialName("large_captions") LARGE_CAPTIONS,
+    @SerialName("children_captions") CHILDREN_CAPTIONS,
+    @SerialName("forced") FORCED,
+    @SerialName("commentary") COMMENTARY,
+    @SerialName("large_commentary") LARGE_COMMENTARY,
+    @SerialName("children_commentary") CHILDREN_COMMENTARY,
+    @SerialName("unspecified") UNSPECIFIED;
+
+    /** Closed captions: dialogue plus sounds, for the deaf and hard of hearing. */
+    val isCaptions: Boolean get() = this == CAPTIONS || this == LARGE_CAPTIONS || this == CHILDREN_CAPTIONS
+
+    val isCommentary: Boolean get() = this == COMMENTARY || this == LARGE_COMMENTARY || this == CHILDREN_COMMENTARY
+}
+
 @Serializable
 data class DvdSubtitleStream(
     val index: Int,
+    /** The stream id the rip engine selects it by (0x20 + its number for the title's display shape). */
     val streamId: Int,
     val language: String? = null,
-    val extension: String,
+    @SerialName("extension") val purpose: SubtitlePurpose = SubtitlePurpose.UNSPECIFIED,
 )
 
 /** The engine could not read the DVD; [message] is its (English) explanation. */

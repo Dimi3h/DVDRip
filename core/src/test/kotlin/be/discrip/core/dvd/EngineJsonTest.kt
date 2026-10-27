@@ -93,9 +93,14 @@ class EngineJsonTest {
     @Test
     fun `parses a probe of the finished file`() {
         val probe = """{"ok":true,"durationMs":12021,"streams":[{"type":"video","codec":"mpeg2video","language":null,"width":720,"height":576},
-            {"type":"audio","codec":"ac3","language":"eng","channels":2,"sampleRate":48000}],"chapterStartsMs":[0,3000,6011]}"""
+            {"type":"audio","codec":"ac3","language":"eng","channels":2,"sampleRate":48000},
+            {"type":"subtitle","codec":"dvd_subtitle","language":"dut"}],"chapterStartsMs":[0,3000,6011],
+            "tags":{"title":"Testfilm","DATE_RELEASED":"2024","TMDB":"movie/603"}}"""
 
         val summary = MkvSummary.parse(probe).getOrThrow()
+
+        assertEquals("dut", summary.subtitles.single().language)
+        assertEquals(mapOf("title" to "Testfilm", "DATE_RELEASED" to "2024", "TMDB" to "movie/603"), summary.tags)
 
         assertEquals(720, summary.video.single().width)
         assertEquals("eng", summary.audio.single().language)

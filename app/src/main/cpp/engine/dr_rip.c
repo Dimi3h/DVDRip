@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #define MAX_TRACKS 8
+#define MAX_SUBTITLES 32
 #define MAX_WARNINGS 16
 #define INPUT_BUFFER_SIZE (64 * 1024)
 #define OUTPUT_BUFFER_SIZE (1024 * 1024)
@@ -42,6 +43,14 @@ typedef struct audio_track {
     int64_t next_pts; /* encoder time base; AV_NOPTS_VALUE until the first frame */
 } audio_track;
 
+typedef struct subtitle_track {
+    const dr_subtitle_choice *choice;
+    int in_index;
+    int64_t last_offset;
+    AVStream *out;
+    int64_t last_dts;
+} subtitle_track;
+
 typedef struct rip {
     const dr_rip_options *options;
     const dr_rip_hooks *hooks;
@@ -64,6 +73,8 @@ typedef struct rip {
 
     audio_track tracks[MAX_TRACKS];
     int track_count;
+    subtitle_track subtitles[MAX_SUBTITLES];
+    int subtitle_count;
 
     int write_errno;
     int64_t last_progress;
@@ -174,6 +185,15 @@ static audio_track *track_for_stream(rip *r, int index) {
     return NULL;
 }
 
+static int copy_packet(rip *r, AVPacket *packet, const AVStream *in, AVStream *out, int64_t *last_offset, int64_t *last_dts, int is_video);
+
+static subtitle_track *subtitle_for_stream(rip *r, int index) {
+    for (int i = 0; i < r->subtitle_count; i++) {
+        if (r->subtitles[i].in_index == index) return &r->subtitles[i];
+    }
+    return NULL;
+}
+
 static enum AVCodecID copy_codec(const audio_attr_t *attr) {
     switch (attr->audio_format) {
         case 0: return AV_CODEC_ID_AC3;
@@ -192,6 +212,110 @@ static const audio_attr_t *audio_attr_for(const rip *r, int stream_id) {
         }
     }
     return NULL;
+}
+
+/* Language, name and flags of an output track. */
+static void describe_track(AVStream *out, const char *language, const char *name, int flags) {
+    if (language != NULL && language[0]) av_dict_set(&out->metadata, "language", language, 0);
+    if (name != NULL && name[0]) av_dict_set(&out->metadata, "title", name, 0);
+    if (flags & DR_TRACK_DEFAULT) out->disposition |= AV_DISPOSITION_DEFAULT;
+    if (flags & DR_TRACK_FORCED) out->disposition |= AV_DISPOSITION_FORCED;
+    if (flags & DR_TRACK_COMMENTARY) out->disposition |= AV_DISPOSITION_COMMENT;
+    if (flags & DR_TRACK_HEARING_IMPAIRED) out->disposition |= AV_DISPOSITION_HEARING_IMPAIRED;
+    if (flags & DR_TRACK_VISUAL_IMPAIRED) out->disposition |= AV_DISPOSITION_VISUAL_IMPAIRED;
+}
+
+/* Whether the title's program chain has a subpicture stream with this id. */
+static int has_subtitle_stream(const rip *r, int stream_id) {
+    const vtsi_mat_t *mat = r->plan.vts->vtsi_mat;
+    for (int i = 0; i < mat->nr_of_vts_subp_streams && i < 32; i++) {
+        if (dr_subtitle_stream_id(&mat->vts_video_attr, r->plan.pgc->subp_control[i]) == stream_id) return 1;
+    }
+    return 0;
+}
+
+/* A palette entry of the program chain (0x00YYCrCb) as RGB, with the BT.601 studio-range formula. */
+static uint32_t palette_rgb(uint32_t entry) {
+    double y = (entry >> 16) & 0xFF;
+    double cr = (entry >> 8) & 0xFF;
+    double cb = entry & 0xFF;
+    double rgb[3] = {
+        1.164 * (y - 16) + 1.596 * (cr - 128),
+        1.164 * (y - 16) - 0.813 * (cr - 128) - 0.392 * (cb - 128),
+        1.164 * (y - 16) + 2.017 * (cb - 128),
+    };
+    uint32_t value = 0;
+    for (int i = 0; i < 3; i++) {
+        double c = rgb[i] < 0 ? 0 : rgb[i] > 255 ? 255 : rgb[i];
+        value = (value << 8) | (uint32_t) (c + 0.5);
+    }
+    return value;
+}
+
+/* S_VOBSUB codec private data: the header of a VobSub .idx file with frame size and palette. */
+static int set_vobsub_header(AVCodecParameters *par, const pgc_t *pgc, int width, int height) {
+    char text[256];
+    int length = snprintf(text, sizeof(text), "size: %dx%d\npalette: ", width, height);
+    for (int i = 0; i < 16; i++) {
+        length += snprintf(text + length, sizeof(text) - (size_t) length, "%06x%s", palette_rgb(pgc->palette[i]),
+                           i < 15 ? ", " : "\n");
+    }
+    par->extradata = av_mallocz((size_t) length + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (par->extradata == NULL) return AVERROR(ENOMEM);
+    memcpy(par->extradata, text, (size_t) length);
+    par->extradata_size = length;
+    return 0;
+}
+
+/*
+ * How long a subpicture unit stays on screen, from the delay of its stop-display command, in
+ * 90 kHz ticks; 0 when it has none. SPU layout: size (2 bytes), offset of the first control
+ * sequence (2), then sequences of delay (2, in units of 1024 ticks), next offset (2) and commands.
+ */
+static int64_t spu_duration(const uint8_t *data, int size) {
+    if (size < 4) return 0;
+    int spu_size = (data[0] << 8) | data[1];
+    if (spu_size > size) spu_size = size;
+    int sequence = (data[2] << 8) | data[3];
+    for (int guard = 0; guard < 16 && sequence + 4 <= spu_size; guard++) {
+        int delay = (data[sequence] << 8) | data[sequence + 1];
+        int next = (data[sequence + 2] << 8) | data[sequence + 3];
+        int at = sequence + 4;
+        while (at < spu_size && data[at] != 0xFF) {
+            int command = data[at++];
+            if (command == 0x02) return (int64_t) delay * 1024;
+            if (command == 0x03 || command == 0x04) at += 2;
+            else if (command == 0x05) at += 6;
+            else if (command == 0x06) at += 4;
+            else if (command > 0x06) return 0; /* unknown command: its length is unknown too */
+        }
+        if (next <= sequence) break;
+        sequence = next;
+    }
+    return 0;
+}
+
+static int add_subtitle_output(rip *r, subtitle_track *track) {
+    track->out = avformat_new_stream(r->out, NULL);
+    if (track->out == NULL) return AVERROR(ENOMEM);
+    track->last_dts = AV_NOPTS_VALUE;
+    const AVCodecParameters *video = r->in->streams[r->video_in]->codecpar;
+    AVCodecParameters *par = track->out->codecpar;
+    par->codec_type = AVMEDIA_TYPE_SUBTITLE;
+    par->codec_id = AV_CODEC_ID_DVD_SUBTITLE;
+    par->width = video->width;
+    par->height = video->height;
+    int result = set_vobsub_header(par, r->plan.pgc, video->width, video->height);
+    if (result < 0) return result;
+    track->out->time_base = MPEG_TIME_BASE;
+    const dr_subtitle_choice *choice = track->choice;
+    describe_track(track->out, choice->language, choice->name, choice->flags);
+    return 0;
+}
+
+static int copy_subtitle_packet(rip *r, AVPacket *packet, const AVStream *in, subtitle_track *track) {
+    if (packet->duration <= 0) packet->duration = av_rescale_q(spu_duration(packet->data, packet->size), MPEG_TIME_BASE, in->time_base);
+    return copy_packet(r, packet, in, track->out, &track->last_offset, &track->last_dts, 0);
 }
 
 /* Encoder for an LPCM track: PCM of the same depth, or FLAC. */
@@ -386,15 +510,19 @@ static int add_audio_output(rip *r, audio_track *track) {
         track->out->time_base = MPEG_TIME_BASE;
     }
     const dr_audio_choice *choice = track->choice;
-    if (choice->language != NULL && choice->language[0]) av_dict_set(&track->out->metadata, "language", choice->language, 0);
-    if (choice->name != NULL && choice->name[0]) av_dict_set(&track->out->metadata, "title", choice->name, 0);
-    if (choice->is_default) track->out->disposition |= AV_DISPOSITION_DEFAULT;
+    describe_track(track->out, choice->language, choice->name, choice->flags);
     return 0;
 }
 
-/* Late streams: a chosen audio stream may first appear after probing. */
+/* Late streams: a chosen audio or subtitle stream may first appear after probing. */
 static void adopt_new_stream(rip *r, int index) {
     AVStream *st = r->in->streams[index];
+    for (int i = 0; i < r->subtitle_count; i++) {
+        if (r->subtitles[i].in_index < 0 && r->subtitles[i].choice->stream_id == st->id) {
+            r->subtitles[i].in_index = index;
+            return;
+        }
+    }
     for (int i = 0; i < r->track_count; i++) {
         audio_track *track = &r->tracks[i];
         if (track->in_index < 0 && track->choice->stream_id == st->id) {
@@ -492,6 +620,7 @@ static char *success(rip *r) {
     }
     dr_json_end_array(&json);
     dr_json_key(&json, "audioTracks"); dr_json_int(&json, r->track_count);
+    dr_json_key(&json, "subtitleTracks"); dr_json_int(&json, r->subtitle_count);
     dr_json_key(&json, "badSectors");
     dr_json_begin_array(&json);
     const dr_bad_range *ranges = NULL;
@@ -554,6 +683,11 @@ static int open_output(rip *r) {
     if (r->options->release_date != NULL && r->options->release_date[0]) {
         av_dict_set(&r->out->metadata, "DATE_RELEASED", r->options->release_date, 0);
     }
+    for (int i = 0; i < r->options->tag_count; i++) {
+        const char *key = r->options->tag_keys[i];
+        const char *value = r->options->tag_values[i];
+        if (key != NULL && key[0] && value != NULL && value[0]) av_dict_set(&r->out->metadata, key, value, 0);
+    }
 
     const AVStream *video = r->in->streams[r->video_in];
     r->video_out = avformat_new_stream(r->out, NULL);
@@ -569,6 +703,10 @@ static int open_output(rip *r) {
 
     for (int i = 0; i < r->track_count; i++) {
         result = add_audio_output(r, &r->tracks[i]);
+        if (result < 0) return result;
+    }
+    for (int i = 0; i < r->subtitle_count; i++) {
+        result = add_subtitle_output(r, &r->subtitles[i]);
         if (result < 0) return result;
     }
     return 0;
@@ -687,8 +825,22 @@ char *dr_rip(dvd_reader_t *dvd, const dr_rip_options *options, const dr_rip_hook
             if (r->in->streams[s]->id == choice->stream_id) track->in_index = (int) s;
         }
     }
+    for (int i = 0; i < options->subtitle_count && r->subtitle_count < MAX_SUBTITLES; i++) {
+        const dr_subtitle_choice *choice = &options->subtitles[i];
+        if (!has_subtitle_stream(r, choice->stream_id)) {
+            warn(r, "Subtitle stream 0x%X is not in this title; skipped", choice->stream_id);
+            continue;
+        }
+        subtitle_track *track = &r->subtitles[r->subtitle_count++];
+        track->choice = choice;
+        track->in_index = -1;
+        for (unsigned int s = 0; s < r->in->nb_streams; s++) {
+            if (r->in->streams[s]->id == choice->stream_id) track->in_index = (int) s;
+        }
+    }
     for (unsigned int i = 0; i < r->in->nb_streams; i++) {
-        if ((int) i != r->video_in && track_for_stream(r, (int) i) == NULL) r->in->streams[i]->discard = AVDISCARD_ALL;
+        int kept = (int) i == r->video_in || track_for_stream(r, (int) i) != NULL || subtitle_for_stream(r, (int) i) != NULL;
+        if (!kept) r->in->streams[i]->discard = AVDISCARD_ALL;
     }
 
     result = open_output(r);
@@ -719,8 +871,11 @@ char *dr_rip(dvd_reader_t *dvd, const dr_rip_options *options, const dr_rip_hook
 
         int index = r->packet->stream_index;
         const AVStream *in = r->in->streams[index];
+        subtitle_track *subtitle = subtitle_for_stream(r, index);
         if (index == r->video_in) {
             result = copy_packet(r, r->packet, in, r->video_out, &r->video_last_offset, &r->video_last_dts, 1);
+        } else if (subtitle != NULL) {
+            result = copy_subtitle_packet(r, r->packet, in, subtitle);
         } else {
             audio_track *track = track_for_stream(r, index);
             if (track == NULL) {
@@ -742,6 +897,12 @@ char *dr_rip(dvd_reader_t *dvd, const dr_rip_options *options, const dr_rip_hook
         report_progress(r, 0);
     }
 
+    for (int i = 0; i < r->subtitle_count; i++) {
+        /* Normal on discs that carry a stream for a few lines only, so a note rather than a warning. */
+        if (r->subtitles[i].in_index < 0) {
+            dr_logf(&r->logger, DR_LOG_INFO, "Subtitle stream 0x%X has no subtitles in this title", r->subtitles[i].choice->stream_id);
+        }
+    }
     for (int i = 0; i < r->track_count; i++) {
         audio_track *track = &r->tracks[i];
         if (track->in_index < 0) warn(r, "Audio stream 0x%X never appeared in the title", track->choice->stream_id);

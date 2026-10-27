@@ -7,7 +7,7 @@
  *   discrip_host titles <image.iso | --dir folder>
  *   discrip_host rip <image.iso | --dir folder> <title> <out.mkv> [--audio id[:lang[:name]],...]
  *                [--default-audio id] [--flac] [--movie-title text] [--date yyyy] [--cancel-after blocks]
- *                [--bad-blocks lba:count]
+ *                [--subs id[:lang[:name]],...] [--forced-sub id] [--tag KEY=value]... [--bad-blocks lba:count]
  *
  * Output is the engine's JSON on stdout; progress and log lines go to stderr.
  */
@@ -207,7 +207,11 @@ int main(int argc, char **argv) {
         options.angle = 1;
         const char *output = argv[next + 1];
         dr_audio_choice audio[8];
+        dr_subtitle_choice subtitles[32];
+        const char *tag_keys[8];
+        const char *tag_values[8];
         int default_audio = -1;
+        int forced_subtitle = -1;
         for (int i = next + 2; i < argc; i++) {
             if (strcmp(argv[i], "--flac") == 0) {
                 options.lpcm_to_flac = 1;
@@ -224,6 +228,27 @@ int main(int argc, char **argv) {
                 source_image.bad_first = strtoull(argv[++i], &end, 0);
                 source_image.bad_count = end != NULL && *end == ':' ? strtoull(end + 1, NULL, 0) : 1;
                 if (source_image.bad_count > 64) source_image.bad_count = 64;
+            } else if (strcmp(argv[i], "--tag") == 0 && i + 1 < argc && options.tag_count < 8) {
+                char *pair = argv[++i];
+                char *value = strchr(pair, '=');
+                if (value != NULL) {
+                    *value++ = '\0';
+                    tag_keys[options.tag_count] = pair;
+                    tag_values[options.tag_count++] = value;
+                }
+            } else if (strcmp(argv[i], "--forced-sub") == 0 && i + 1 < argc) {
+                forced_subtitle = (int) strtol(argv[++i], NULL, 0);
+            } else if (strcmp(argv[i], "--subs") == 0 && i + 1 < argc) {
+                char *list = argv[++i];
+                for (char *item = strtok(list, ","); item != NULL && options.subtitle_count < 32; item = strtok(NULL, ",")) {
+                    int n = options.subtitle_count++;
+                    char *id = item;
+                    char *language = strchr(id, ':');
+                    if (language != NULL) *language++ = '\0';
+                    char *name = language != NULL ? strchr(language, ':') : NULL;
+                    if (name != NULL) *name++ = '\0';
+                    subtitles[n] = (dr_subtitle_choice) {(int) strtol(id, NULL, 0), language, name, 0};
+                }
             } else if (strcmp(argv[i], "--audio") == 0 && i + 1 < argc) {
                 char *list = argv[++i];
                 for (char *item = strtok(list, ","); item != NULL && options.audio_count < 8; item = strtok(NULL, ",")) {
@@ -238,9 +263,15 @@ int main(int argc, char **argv) {
             }
         }
         for (int i = 0; i < options.audio_count; i++) {
-            audio[i].is_default = default_audio >= 0 ? audio[i].stream_id == default_audio : i == 0;
+            if (default_audio >= 0 ? audio[i].stream_id == default_audio : i == 0) audio[i].flags |= DR_TRACK_DEFAULT;
         }
         options.audio = audio;
+        for (int i = 0; i < options.subtitle_count; i++) {
+            if (subtitles[i].stream_id == forced_subtitle) subtitles[i].flags |= DR_TRACK_FORCED;
+        }
+        options.subtitles = subtitles;
+        options.tag_keys = tag_keys;
+        options.tag_values = tag_values;
         options.output_fd = open(output, O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (options.output_fd < 0) {
             fprintf(stderr, "Cannot create %s: %s\n", output, strerror(errno));

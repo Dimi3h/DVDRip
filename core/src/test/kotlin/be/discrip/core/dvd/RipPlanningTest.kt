@@ -2,46 +2,34 @@ package be.discrip.core.dvd
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 
 class RipPlanningTest {
 
     private val video = DvdVideo(2, "PAL", "16:9", 720, 576, letterboxed = false, film = false)
 
-    private fun title(number: Int, durationMs: Long, chapters: Int = 1, audio: List<DvdAudioStream> = emptyList()) =
-        DvdTitle(number, 1, 1, chapters, chapters, 1000, durationMs, video, audio, emptyList(), emptyList())
+    private fun title(audio: List<DvdAudioStream> = emptyList(), subtitles: List<DvdSubtitleStream> = emptyList()) =
+        DvdTitle(1, 1, 1, 1, 1, 1000, 1000, video, audio, subtitles, emptyList())
 
     private fun audio(index: Int, language: String?, codec: AudioCodec = AudioCodec.AC3, purpose: AudioPurpose = AudioPurpose.NORMAL) =
         DvdAudioStream(index, 0x80 + index, codec, language, 6, 48000, 0, purpose)
 
-    @Test
-    fun `the longest title is the main feature`() {
-        val titles = listOf(title(1, 30_000), title(2, 6_000_000), title(3, 120_000))
-
-        assertEquals(2, RipPlanning.mainTitle(titles)?.number)
-    }
+    private fun subtitle(index: Int, language: String?, purpose: SubtitlePurpose = SubtitlePurpose.NORMAL) =
+        DvdSubtitleStream(index, 0x20 + index, language, purpose)
 
     @Test
-    fun `equal lengths go to more chapters, then the lower number`() {
-        assertEquals(3, RipPlanning.mainTitle(listOf(title(2, 1000, chapters = 4), title(3, 1000, chapters = 9)))?.number)
-        assertEquals(2, RipPlanning.mainTitle(listOf(title(3, 1000, chapters = 4), title(2, 1000, chapters = 4)))?.number)
-        assertNull(RipPlanning.mainTitle(emptyList()))
-    }
-
-    @Test
-    fun `Dutch and English go first, others keep the disc order`() {
-        val t = title(1, 1000, audio = listOf(audio(0, "fr"), audio(1, "en"), audio(2, "de"), audio(3, "nl")))
+    fun `Dutch and English audio go first, others keep the disc order`() {
+        val t = title(audio = listOf(audio(0, "fr"), audio(1, "en"), audio(2, "de"), audio(3, "nl")))
 
         val tracks = RipPlanning.audioTracks(t)
 
         assertEquals(listOf("dut", "eng", "fre", "ger"), tracks.map { it.language })
         assertEquals(listOf(true, false, false, false), tracks.map { it.isDefault })
+        assertEquals(listOf(TrackFlags.DEFAULT, 0, 0, 0), tracks.map { it.flags })
     }
 
     @Test
-    fun `commentary comes after the main track of its language and is never the default`() {
+    fun `commentary comes after the main track of its language, is flagged and never the default`() {
         val t = title(
-            1, 1000,
             audio = listOf(
                 audio(0, "en", purpose = AudioPurpose.COMMENTARY),
                 audio(1, "en"),
@@ -53,18 +41,32 @@ class RipPlanningTest {
 
         assertEquals(listOf(0x81, 0x80, 0x82), tracks.map { it.streamId })
         assertEquals(listOf(true, false, false), tracks.map { it.isDefault })
+        assertEquals(listOf(TrackFlags.DEFAULT, TrackFlags.COMMENTARY, TrackFlags.VISUAL_IMPAIRED), tracks.map { it.flags })
+    }
+
+    @Test
+    fun `only selected audio goes in, with the chosen default when it is selected`() {
+        val t = title(audio = listOf(audio(0, "en"), audio(1, "nl"), audio(2, "fr")))
+
+        val chosen = RipPlanning.audioTracks(t, selected = setOf(0x80, 0x82), defaultStreamId = 0x82)
+        assertEquals(listOf(0x80, 0x82), chosen.map { it.streamId })
+        assertEquals(listOf(false, true), chosen.map { it.isDefault })
+
+        // A default that is not selected falls back to the first main track.
+        val fallback = RipPlanning.audioTracks(t, selected = setOf(0x80, 0x82), defaultStreamId = 0x81)
+        assertEquals(listOf(true, false), fallback.map { it.isDefault })
     }
 
     @Test
     fun `tracks without a language stay in, as undetermined`() {
-        val tracks = RipPlanning.audioTracks(title(1, 1000, audio = listOf(audio(0, null), audio(1, "en"))))
+        val tracks = RipPlanning.audioTracks(title(audio = listOf(audio(0, null), audio(1, "en"))))
 
         assertEquals(listOf("eng", null), tracks.map { it.language })
     }
 
     @Test
-    fun `streams of an unknown format are left out`() {
-        val tracks = RipPlanning.audioTracks(title(1, 1000, audio = listOf(audio(0, "en", AudioCodec.UNKNOWN), audio(1, "en", AudioCodec.DTS))))
+    fun `audio of an unknown format is left out`() {
+        val tracks = RipPlanning.audioTracks(title(audio = listOf(audio(0, "en", AudioCodec.UNKNOWN), audio(1, "en", AudioCodec.DTS))))
 
         assertEquals(listOf(0x81), tracks.map { it.streamId })
         assertEquals(true, tracks.single().isDefault)
@@ -72,8 +74,40 @@ class RipPlanningTest {
 
     @Test
     fun `with only commentary the first track is still the default`() {
-        val tracks = RipPlanning.audioTracks(title(1, 1000, audio = listOf(audio(0, "en", purpose = AudioPurpose.COMMENTARY))))
+        val tracks = RipPlanning.audioTracks(title(audio = listOf(audio(0, "en", purpose = AudioPurpose.COMMENTARY))))
 
         assertEquals(listOf(true), tracks.map { it.isDefault })
+    }
+
+    @Test
+    fun `subtitles go Dutch and English first, plain before forced, captions and commentary`() {
+        val t = title(
+            subtitles = listOf(
+                subtitle(0, "fr"),
+                subtitle(1, "en", SubtitlePurpose.COMMENTARY),
+                subtitle(2, "en", SubtitlePurpose.CAPTIONS),
+                subtitle(3, "en"),
+                subtitle(4, "nl", SubtitlePurpose.FORCED),
+                subtitle(5, "nl"),
+                subtitle(6, null),
+            ),
+        )
+
+        val tracks = RipPlanning.subtitleTracks(t)
+
+        assertEquals(listOf(0x25, 0x24, 0x23, 0x22, 0x21, 0x20, 0x26), tracks.map { it.streamId })
+        assertEquals(listOf("dut", "dut", "eng", "eng", "eng", "fre", null), tracks.map { it.language })
+        assertEquals(
+            listOf(0, TrackFlags.FORCED, 0, TrackFlags.HEARING_IMPAIRED, TrackFlags.COMMENTARY, 0, 0),
+            tracks.map { it.flags },
+        )
+    }
+
+    @Test
+    fun `only selected subtitles go in`() {
+        val t = title(subtitles = listOf(subtitle(0, "en"), subtitle(1, "nl"), subtitle(2, "de")))
+
+        assertEquals(listOf(0x21, 0x22), RipPlanning.subtitleTracks(t, selected = setOf(0x21, 0x22)).map { it.streamId })
+        assertEquals(emptyList(), RipPlanning.subtitleTracks(t, selected = emptySet()))
     }
 }

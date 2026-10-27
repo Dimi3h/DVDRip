@@ -81,9 +81,17 @@ fun RipScreen(container: AppContainer, backLabel: String, onBack: () -> Unit, on
             }
             is RipState.Failed -> {
                 JobHeader(rip.job)
+                val locale = currentLocale()
+                val needed = rip.neededBytes
+                val free = rip.freeBytes
                 GroupedSection(
                     header = stringResource(R.string.rip_failed_header),
-                    footer = rip.message.takeIf { it.isNotBlank() }?.let { stringResource(R.string.rip_failure_detail, it) },
+                    footer = when {
+                        needed != null && free != null ->
+                            stringResource(R.string.rip_failure_no_space_numbers, Formats.bytes(needed, locale), Formats.bytes(free, locale))
+                        rip.message.isNotBlank() -> stringResource(R.string.rip_failure_detail, rip.message)
+                        else -> null
+                    },
                 ) {
                     row { TextRow(failureText(rip.reason)) }
                 }
@@ -174,6 +182,16 @@ private fun SucceededContent(rip: RipState.Succeeded) {
                     languageName(Iso639.fromBibliographic(stream.language), locale) ?: stream.codec.orEmpty()
                 },
             )
+        }
+        if (file.subtitles.isNotEmpty()) {
+            row {
+                ValueRow(
+                    stringResource(R.string.rip_result_subtitles),
+                    file.subtitles.joinToString(", ") { stream ->
+                        languageName(Iso639.fromBibliographic(stream.language), locale) ?: stream.codec.orEmpty()
+                    },
+                )
+            }
         }
     }
     if (badSectors > 0 || result.warnings.isNotEmpty()) {

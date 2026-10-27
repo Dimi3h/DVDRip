@@ -6,6 +6,8 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.system.ErrnoException
+import android.system.Os
 import androidx.core.net.toUri
 import be.discrip.core.disc.DiscProbe
 import be.discrip.core.disc.DiscProbeException
@@ -13,12 +15,14 @@ import be.discrip.core.disc.FileBlockDevice
 import be.discrip.core.dvd.AudioTrackPlan
 import be.discrip.core.dvd.DvdReadException
 import be.discrip.core.dvd.DvdTitle
+import be.discrip.core.dvd.MainFeature
 import be.discrip.core.dvd.MkvSummary
 import be.discrip.core.dvd.ProgressTracker
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.dvd.RipOutcome
-import be.discrip.core.dvd.RipPlanning
 import be.discrip.core.dvd.RipProgress
+import be.discrip.core.dvd.SubtitleTrackPlan
+import be.discrip.core.estimate.SizeEstimator
 import be.discrip.core.model.MovieMetadata
 import be.discrip.core.naming.RipPath
 import kotlinx.coroutines.CoroutineScope
@@ -67,7 +71,7 @@ sealed interface SourceState {
     data class Opening(val source: DvdSource) : SourceState
 
     data class Ready(val source: DvdSource, val name: String?, val titles: List<DvdTitle>) : SourceState {
-        val mainTitle: DvdTitle? get() = RipPlanning.mainTitle(titles)
+        val mainTitle: DvdTitle? by lazy { MainFeature.choose(titles) }
     }
 
     data class Failed(val source: DvdSource, val problem: SourceProblem, val detail: String?) : SourceState
@@ -88,7 +92,10 @@ data class RipJob(
     val metadata: MovieMetadata,
     val title: DvdTitle,
     val audio: List<AudioTrackPlan>,
+    val subtitles: List<SubtitleTrackPlan>,
     val lpcmToFlac: Boolean,
+    /** The size the rip is expected to reach; the free-space check asks for 10 % more. */
+    val estimatedBytes: Long,
     /** Where the file goes, relative to the local folder. */
     val path: RipPath,
     val treeUri: String,
@@ -101,7 +108,14 @@ sealed interface RipState {
 
     data class Succeeded(val job: RipJob, val result: RipOutcome.Success, val file: MkvSummary) : RipState
 
-    data class Failed(val job: RipJob, val reason: RipFailure, val message: String) : RipState
+    /** [neededBytes] and [freeBytes] are set when the rip did not start for lack of space. */
+    data class Failed(
+        val job: RipJob,
+        val reason: RipFailure,
+        val message: String,
+        val neededBytes: Long? = null,
+        val freeBytes: Long? = null,
+    ) : RipState
 }
 
 /**
@@ -227,8 +241,12 @@ class RipManager(
             return RipState.Failed(job, RipFailure.OUTPUT_UNAVAILABLE, e.message.orEmpty())
         }
         val tracker = ProgressTracker(SystemClock::elapsedRealtime)
+        val needed = SizeEstimator.requiredFreeBytes(job.estimatedBytes)
+        var free: Long? = null
         val (outcome, summary) = try {
             output.open().use { file ->
+                free = freeBytes(file)
+                if (free != null && free < needed) return@use null to null
                 ripping = dvd
                 val outcome = try {
                     dvd.rip(request(job), file, cancelled::get) { done, total, bytes, position ->
@@ -248,6 +266,10 @@ class RipManager(
             return RipState.Failed(job, RipFailure.OUTPUT_UNAVAILABLE, e.message.orEmpty())
         }
 
+        if (outcome == null) {
+            output.discard()
+            return RipState.Failed(job, RipFailure.NO_SPACE, "", neededBytes = needed, freeBytes = free)
+        }
         if (outcome is RipOutcome.Failure) {
             output.discard()
             return RipState.Failed(job, outcome.reason, outcome.message)
@@ -268,12 +290,31 @@ class RipManager(
 
     private fun request(job: RipJob) = RipRequest(
         title = job.title.number,
-        audio = job.audio.map { RipAudioTrack(it.streamId, it.language, labels.trackName(it), it.isDefault) },
+        audio = job.audio.map { RipTrack(it.streamId, it.language, labels.trackName(it), it.flags) },
+        subtitles = job.subtitles.map { RipTrack(it.streamId, it.language, labels.subtitleName(it), it.flags) },
         lpcmToFlac = job.lpcmToFlac,
         movieTitle = job.metadata.title,
         releaseDate = job.metadata.year?.toString(),
         chapterNames = (1..job.title.chapterStartsMs.size).map(labels::chapterName),
+        tags = filmTags(job.metadata),
     )
+
+    /** Matroska's IMDB, TMDB and SUMMARY tags, which media centres such as Kodi and Jellyfin read. */
+    private fun filmTags(metadata: MovieMetadata): Map<String, String> {
+        val film = metadata.normalized()
+        return buildMap {
+            film.imdbId?.let { put("IMDB", it) }
+            film.tmdbId?.let { put("TMDB", "movie/$it") }
+            film.overview?.takeIf { it.isNotBlank() }?.let { put("SUMMARY", it) }
+        }
+    }
+
+    /** Free space on the file system of [file], or null when it cannot be told. */
+    private fun freeBytes(file: ParcelFileDescriptor): Long? = try {
+        Os.fstatvfs(file.fileDescriptor).let { it.f_bavail * it.f_frsize }
+    } catch (e: ErrnoException) {
+        null
+    }
 
     private fun closeSession() {
         session?.close()

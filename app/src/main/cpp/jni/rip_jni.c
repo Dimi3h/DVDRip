@@ -388,16 +388,57 @@ static void free_texts(char **texts, int count) {
     free(texts);
 }
 
+/* Tracks of one kind as Kotlin passes them: parallel arrays of stream ids, flags, languages, names. */
+typedef struct track_arrays {
+    int count;
+    jint *ids;
+    jint *flags;
+    char **languages;
+    int language_count;
+    char **names;
+    int name_count;
+} track_arrays;
+
+/* False (exception pending) when the arrays differ in length or memory runs out. */
+static int read_tracks(JNIEnv *env, jintArray ids, jintArray flags, jobjectArray languages, jobjectArray names,
+                       track_arrays *out) {
+    *out = (track_arrays) {0};
+    out->count = (*env)->GetArrayLength(env, ids);
+    if ((*env)->GetArrayLength(env, flags) != out->count || (*env)->GetArrayLength(env, languages) != out->count ||
+        (*env)->GetArrayLength(env, names) != out->count) {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/IllegalArgumentException"), "track arrays differ in length");
+        return 0;
+    }
+    if (out->count == 0) return 1;
+    out->ids = (*env)->GetIntArrayElements(env, ids, NULL);
+    out->flags = out->ids != NULL ? (*env)->GetIntArrayElements(env, flags, NULL) : NULL;
+    out->language_count = out->flags != NULL ? texts_of(env, languages, &out->languages) : -1;
+    out->name_count = out->language_count >= 0 ? texts_of(env, names, &out->names) : -1;
+    if (out->name_count < 0 && !(*env)->ExceptionCheck(env)) {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/OutOfMemoryError"), "track arrays");
+    }
+    return out->name_count >= 0;
+}
+
+static void release_tracks(JNIEnv *env, jintArray ids, jintArray flags, track_arrays *tracks) {
+    if (tracks->ids != NULL) (*env)->ReleaseIntArrayElements(env, ids, tracks->ids, JNI_ABORT);
+    if (tracks->flags != NULL) (*env)->ReleaseIntArrayElements(env, flags, tracks->flags, JNI_ABORT);
+    free_texts(tracks->languages, tracks->language_count);
+    free_texts(tracks->names, tracks->name_count);
+}
+
 /*
- * Rips a title to output_fd (which stays the caller's). Audio tracks are given in output order:
- * audioIds[i] with audioLanguages[i] (ISO 639-2/B) and audioNames[i], either may be null.
+ * Rips a title to output_fd (which stays the caller's). Tracks are given in output order, as
+ * parallel arrays: stream id, DR_TRACK_ flags, language (ISO 639-2/B) and name, the last two
+ * possibly null.
  */
 JNIEXPORT jbyteArray JNICALL
 Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint title, jint angle,
-                                  jintArray audio_ids, jobjectArray audio_languages, jobjectArray audio_names,
-                                  jint default_audio, jboolean lpcm_to_flac, jbyteArray movie_title,
-                                  jbyteArray release_date, jobjectArray chapter_names, jint output_fd,
-                                  jobject listener) {
+                                  jintArray audio_ids, jintArray audio_flags, jobjectArray audio_languages,
+                                  jobjectArray audio_names, jintArray subtitle_ids, jintArray subtitle_flags,
+                                  jobjectArray subtitle_languages, jobjectArray subtitle_names, jboolean lpcm_to_flac,
+                                  jbyteArray movie_title, jbyteArray release_date, jobjectArray tag_keys,
+                                  jobjectArray tag_values, jobjectArray chapter_names, jint output_fd, jobject listener) {
     (void) clazz;
     session *s = session_of(handle);
     atomic_store(&s->cancel, 0);
@@ -407,40 +448,52 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
     (*env)->DeleteLocalRef(env, listener_type);
     if (on_progress_id == NULL) return NULL; /* NoSuchMethodError pending */
 
-    int audio_count = (*env)->GetArrayLength(env, audio_ids);
-    if ((*env)->GetArrayLength(env, audio_languages) != audio_count ||
-        (*env)->GetArrayLength(env, audio_names) != audio_count) {
-        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/IllegalArgumentException"), "audio arrays differ in length");
+    track_arrays audio_in = {0};
+    track_arrays subtitles_in = {0};
+    int read = read_tracks(env, audio_ids, audio_flags, audio_languages, audio_names, &audio_in);
+    read = read && read_tracks(env, subtitle_ids, subtitle_flags, subtitle_languages, subtitle_names, &subtitles_in);
+    if (!read) {
+        release_tracks(env, audio_ids, audio_flags, &audio_in);
+        release_tracks(env, subtitle_ids, subtitle_flags, &subtitles_in);
         return NULL;
     }
-    jint *ids = audio_count > 0 ? (*env)->GetIntArrayElements(env, audio_ids, NULL) : NULL;
-    char **languages = NULL;
-    char **names = NULL;
+
     char **chapters = NULL;
+    char **keys = NULL;
+    char **values = NULL;
     char *movie = text_of(env, movie_title);
     char *date = text_of(env, release_date);
-    int language_count = texts_of(env, audio_languages, &languages);
-    int name_count = texts_of(env, audio_names, &names);
     int chapter_count = texts_of(env, chapter_names, &chapters);
-    dr_audio_choice *audio = calloc(audio_count > 0 ? (size_t) audio_count : 1, sizeof(dr_audio_choice));
+    int key_count = texts_of(env, tag_keys, &keys);
+    int value_count = texts_of(env, tag_values, &values);
+    dr_audio_choice *audio = calloc(audio_in.count > 0 ? (size_t) audio_in.count : 1, sizeof(dr_audio_choice));
+    dr_subtitle_choice *subtitles = calloc(subtitles_in.count > 0 ? (size_t) subtitles_in.count : 1, sizeof(dr_subtitle_choice));
 
     char *report;
-    if (audio == NULL || language_count < 0 || name_count < 0 || chapter_count < 0 ||
-        (audio_count > 0 && ids == NULL) || (movie_title != NULL && movie == NULL) ||
-        (release_date != NULL && date == NULL)) {
+    if (audio == NULL || subtitles == NULL || chapter_count < 0 || key_count < 0 || value_count != key_count ||
+        (movie_title != NULL && movie == NULL) || (release_date != NULL && date == NULL)) {
         report = NULL;
     } else {
-        for (int i = 0; i < audio_count; i++) {
-            audio[i] = (dr_audio_choice) {ids[i], languages[i], names[i], i == default_audio};
+        for (int i = 0; i < audio_in.count; i++) {
+            audio[i] = (dr_audio_choice) {audio_in.ids[i], audio_in.languages[i], audio_in.names[i], audio_in.flags[i]};
+        }
+        for (int i = 0; i < subtitles_in.count; i++) {
+            subtitles[i] = (dr_subtitle_choice) {subtitles_in.ids[i], subtitles_in.languages[i], subtitles_in.names[i],
+                                                 subtitles_in.flags[i]};
         }
         dr_rip_options options = {
             .title = title,
             .angle = angle,
             .audio = audio,
-            .audio_count = audio_count,
+            .audio_count = audio_in.count,
+            .subtitles = subtitles,
+            .subtitle_count = subtitles_in.count,
             .lpcm_to_flac = lpcm_to_flac,
             .movie_title = movie,
             .release_date = date,
+            .tag_keys = (const char *const *) keys,
+            .tag_values = (const char *const *) values,
+            .tag_count = key_count,
             .chapter_names = (const char *const *) chapters,
             .chapter_name_count = chapter_count,
             .output_fd = output_fd,
@@ -450,11 +503,13 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
         report = dr_rip(dr_dvd_reader(s->dvd), &options, &hooks, &logger);
     }
 
-    if (ids != NULL) (*env)->ReleaseIntArrayElements(env, audio_ids, ids, JNI_ABORT);
-    free_texts(languages, language_count);
-    free_texts(names, name_count);
+    release_tracks(env, audio_ids, audio_flags, &audio_in);
+    release_tracks(env, subtitle_ids, subtitle_flags, &subtitles_in);
     free_texts(chapters, chapter_count);
+    free_texts(keys, key_count);
+    free_texts(values, value_count);
     free(audio);
+    free(subtitles);
     free(movie);
     free(date);
     return take_json(env, report);

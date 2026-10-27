@@ -49,6 +49,17 @@ def probe(path, entries):
     return json.loads(out)
 
 
+def codec_private(path, stream):
+    """The CodecPrivate of a stream, from ffprobe's hex dump of its extradata."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", stream, "-show_streams", "-show_data", path],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    dump = out.split("extradata=", 1)[1].split("extradata_size", 1)[0]
+    hex_digits = "".join("".join(line[10:50].split()) for line in dump.strip().splitlines())
+    return bytes.fromhex(hex_digits).decode("ascii")
+
+
 def tone(path, track, start):
     """Dominant frequency (zero crossings) of 0.3 s of an audio track from start seconds on."""
     raw = subprocess.run(
@@ -83,11 +94,17 @@ class EngineTest(unittest.TestCase):
                          {k: main["video"][k] for k in ("standard", "aspect", "width", "height")})
         self.assertEqual([(0x80, "ac3", "en"), (0xA0, "lpcm", "nl")],
                          [(a["streamId"], a["codec"], a["language"]) for a in main["audio"]])
+        self.assertEqual([(0x20, "nl"), (0x21, "en")], [(s["streamId"], s["language"]) for s in main["subtitles"]])
+        self.assertEqual([], image[1]["subtitles"])
+        # The cells in playback order, for the main feature detection in the app.
+        self.assertEqual([3000, 3000, 6000], [c["durationMs"] for c in main["playback"]])
+        self.assertEqual(0, main["playback"][0]["first"])
+        self.assertEqual(main["sectors"], sum(c["last"] - c["first"] + 1 for c in main["playback"]))
 
     def test_lossless_rip_lines_up_the_timeline(self):
         path = self.output("main.mkv")
         report = host("rip", ISO, "1", path, "--audio", "0x80:eng:Stereo,0xa0:dut",
-                      "--movie-title", "Testfilm", "--date", "2024")
+                      "--movie-title", "Testfilm", "--date", "2024", "--tag", "IMDB=tt0133093", "--tag", "TMDB=movie/603")
         self.assertTrue(report["ok"])
         self.assertEqual([], report["badSectors"])
         self.assertAlmostEqual(12000, report["durationMs"], delta=50)
@@ -104,6 +121,8 @@ class EngineTest(unittest.TestCase):
         self.assertEqual([1, 1, 0], [s["disposition"]["default"] for s in streams])
         self.assertEqual("Testfilm", info["format"]["tags"]["title"])
         self.assertEqual("2024", info["format"]["tags"]["DATE_RELEASED"])
+        self.assertEqual("tt0133093", info["format"]["tags"]["IMDB"])
+        self.assertEqual("movie/603", info["format"]["tags"]["TMDB"])
 
         chapters = probe(path, "chapter=start_time")["chapters"]
         self.assertEqual(3, len(chapters))
@@ -168,6 +187,44 @@ class EngineTest(unittest.TestCase):
     def test_a_full_disk_is_reported_as_such(self):
         report = host("rip", ISO, "1", "/dev/full", "--audio", "0x80", check=False)
         self.assertEqual("no_space", report["error"])
+
+    def test_subtitles_become_vobsub_tracks_on_the_same_timeline(self):
+        path = self.output("subs.mkv")
+        report = host("rip", ISO, "1", path, "--audio", "0x80:eng", "--subs", "0x20:dut,0x21:eng:Forced", "--forced-sub", "0x21")
+        self.assertEqual(2, report["subtitleTracks"])
+
+        streams = probe(path, "stream=codec_name:stream_tags=language,title:stream_disposition=default,forced")["streams"]
+        subtitles = streams[2:]
+        self.assertEqual(["dvd_subtitle", "dvd_subtitle"], [s["codec_name"] for s in subtitles])
+        self.assertEqual(["dut", "eng"], [s["tags"]["language"] for s in subtitles])
+        self.assertEqual("Forced", subtitles[1]["tags"]["title"])
+        self.assertEqual([0, 1], [s["disposition"]["forced"] for s in subtitles])
+        self.assertEqual([0, 0], [s["disposition"]["default"] for s in subtitles])
+
+        # The program chain palette (YCrCb in the IFO) comes back as the RGB it was authored with.
+        header = codec_private(path, "s:0")
+        self.assertTrue(header.startswith("size: 720x576\npalette: 000000, ffffff, ffff00, 0000ff, 808080"), header)
+
+        packets = probe(path, "packet=stream_index,pts_time,duration_time")["packets"]
+        dutch = [(float(p["pts_time"]), float(p["duration_time"])) for p in packets if p["stream_index"] == 2]
+        english = [(float(p["pts_time"]), float(p["duration_time"])) for p in packets if p["stream_index"] == 3]
+        # One subtitle per part; the second part's comes after the clock jump, at 6 s + 1 s.
+        self.assertEqual(2, len(dutch))
+        self.assertAlmostEqual(1.0, dutch[0][0], delta=0.05)
+        self.assertAlmostEqual(7.0, dutch[1][0], delta=0.05)
+        self.assertAlmostEqual(1.5, dutch[0][1], delta=0.05)
+        self.assertAlmostEqual(1.2, english[0][0], delta=0.05)
+        self.assertAlmostEqual(0.8, english[0][1], delta=0.05)
+
+        # Decoding needs the size and palette from the header; re-encoding makes ffmpeg decode it all.
+        decode = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", "0:s", "-c:s", "dvdsub", "-f", "matroska", "-"],
+                                capture_output=True)
+        self.assertEqual(b"", decode.stderr)
+
+    def test_a_subtitle_stream_the_title_lacks_is_skipped(self):
+        report = host("rip", ISO, "2", self.output("nosubs.mkv"), "--subs", "0x20:dut")
+        self.assertEqual(0, report["subtitleTracks"])
+        self.assertEqual(["Subtitle stream 0x20 is not in this title; skipped"], report["warnings"])
 
     def test_missing_title(self):
         report = host("rip", ISO, "9", self.output("missing.mkv"), check=False)

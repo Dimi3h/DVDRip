@@ -16,7 +16,7 @@ The app is built in phases; every phase ends with a buildable app and passing te
 | 1 | Project skeleton, HIG theme, Settings (presets, storage, NAS, Plex, TMDB key), TMDB client, manual metadata form | done |
 | 2 | USB layer: enumerate the drive, INQUIRY, detect the disc, read sector 16 and show the volume label; fake block device backed by an ISO | done |
 | 3 | Native build (libdvdread, libdvdcss, FFmpeg), JNI bridge, ISO to MKV end to end with the lossless preset | done |
-| 4 | Main-feature detection, audio and subtitle selection, chapters, tags, size estimates, free-space check | planned |
+| 4 | Main-feature detection, audio and subtitle selection, chapters, tags, size estimates, free-space check | done |
 | 5 | SMB upload, Plex refresh and verification, "Beide" mode, history | planned |
 | 6 | Real USB drive, foreground service, eject, batch flow | planned |
 | 7 | Lossy presets: MediaCodec encoders, yadif, aspect ratio, H.264 fallback, LPCM to FLAC | planned |
@@ -94,6 +94,32 @@ The app is built in phases; every phase ends with a buildable app and passing te
 
 The USB drive from phase 2 is not a rip source yet: ripping from the drive, with CSS
 authentication, comes in phase 6 (see "CSS on real drives" below).
+
+### What phase 4 contains
+
+- **Main feature detection**, also on discs that hide the film among decoy titles (Disney's
+  "X-Project", ARccOS and similar): the main feature is the longest title that plays its cells
+  front to back. Titles whose cells jump back, repeat, or claim more data than DVD-Video can play
+  in their time are discounted and marked "scènes door elkaar". Titles shorter than two minutes
+  and decoys are folded away under "Alle n titels tonen".
+- **Audio selection**: a checkmark per track (all on by default, Dutch and English first), and
+  "Standaardspoor" to choose which one plays first. Commentary and audio description are named
+  and carry Matroska's FlagCommentary and FlagVisualImpaired.
+- **Subtitles**: a checkmark per stream (all on), written as VobSub (`S_VOBSUB`) with the frame
+  size and the title's own palette (the IFO's YCrCb converted to RGB), the display time of each
+  subtitle taken from its stop command, ISO 639-2/B language tags, and FlagForced,
+  FlagHearingImpaired or FlagCommentary where the disc says so. None is marked default; Plex picks
+  subtitles by the viewer's language settings. Subtitles follow the same timeline correction as
+  audio and video.
+- **Tags**: besides TITLE and DATE_RELEASED, IMDB (`tt0133093`), TMDB (`movie/603`) and SUMMARY
+  (the TMDB overview), which Kodi and Jellyfin read; Plex finds the film by the file name.
+- **Size and space**: the estimated size of the MKV (from the title's VOB size and the streams
+  kept) and the free space of the local folder on the source screen. A rip only starts with the
+  estimate plus 10 % free; the check is repeated on the file system of the file it creates, so
+  it also holds for storage that cannot tell its free space in advance. When the space is short,
+  the message says how much is needed and how much is free.
+- **Read back**: the result screen lists the subtitle tracks found in the finished file next to
+  the audio, and the tags are checked in the instrumented test.
 
 ## Building
 
@@ -321,6 +347,20 @@ These were made without asking because they do not change the architecture; each
 21. **No foreground service yet.** Until phase 6 the rip runs while DiscRip is open: the rip screen
     keeps the display (and with it the CPU) awake. Leaving the app during a rip can get it paused
     or stopped by Android.
+22. **Main feature by cell order.** Players reach the film through the disc's menus, which would
+    need a DVD virtual machine (libdvdnav) to follow. The cell lists say enough instead: decoy
+    titles reuse the film's cells in shuffled or repeated order, or point cells at more data than
+    can play in their time (over 10.08 Mbit/s). The score is duration / (1 + anomalies); among
+    titles within 1 % of the best, fewer anomalies, fewer sub-second cells, longer, more chapters
+    and a lower title number win. Of two clean cuts (theatrical and extended, made with seamless
+    branching) the longer one is chosen; the user can pick the other.
+23. **Subtitles stay pictures.** DVD subtitles are bitmaps. Turning them into text would need OCR
+    and would lose positioning and styling, so they are copied as VobSub, which Plex, VLC and Kodi
+    play. The palette has to come from the IFO, because the subtitle stream only holds palette
+    indices.
+24. **Audio rates for estimates.** The IFO does not record the bit rate of compressed audio, so
+    estimates use the rates DVDs use most: AC-3 192 kbit/s for stereo and 448 for 5.1, DTS 768,
+    MPEG audio 224; LPCM is calculated exactly. The video rate is what the title's VOB data leaves.
 
 ## CSS on real drives (phase 6)
 
@@ -372,6 +412,17 @@ Phase 3 on a phone (no drive needed):
 6. Copy a VIDEO_TS folder to a USB stick, pick it with "VIDEO_TS-map" and rip it.
 7. Take the SD card or USB stick with the local folder out during a rip: the rip stops with a clear
    message.
+
+Phase 4 on a phone:
+
+1. Open an image of a disc with several audio tracks and subtitles. Uncheck a few tracks and pick
+   another "Standaardspoor"; the estimated size goes down as tracks are unchecked.
+2. Rip and check in VLC or Plex: only the checked tracks, in the order shown, the chosen default,
+   subtitles in the right colours and at the right moments, also after the layer change.
+3. Open an image of a disc with decoy titles (many titles of the same length): "Hoofdfilm" should
+   sit on a title without "scènes door elkaar", and its rip should play the scenes in order.
+4. Fill the local folder until less than the estimate is free: the start button stays disabled
+   and the footer gives the numbers.
 
 ## Privacy
 

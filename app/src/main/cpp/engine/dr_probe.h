@@ -4,7 +4,8 @@
 
 /*
  * Describes the file on fd (read from its start; the descriptor stays the caller's) as JSON:
- *   {"ok":true,"durationMs":…,"streams":[{"type":"video","codec":"mpeg2video",…}],"chapterStartsMs":[…]}
+ *   {"ok":true,"durationMs":…,"streams":[{"type":"video","codec":"mpeg2video",…}],"chapterStartsMs":[…],
+ *    "tags":{"title":"…","DATE_RELEASED":"…",…}}
  *   {"ok":false,"message":"…"}
  */
 char *dr_probe(int fd);

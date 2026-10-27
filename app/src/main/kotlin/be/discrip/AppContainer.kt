@@ -25,7 +25,7 @@ private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 /** Manual dependency wiring; one instance lives in the Application. */
 class AppContainer(context: Context) {
 
-    private val appContext = context.applicationContext
+    val appContext: Context = context.applicationContext
 
     val appContentResolver get() = appContext.contentResolver
 

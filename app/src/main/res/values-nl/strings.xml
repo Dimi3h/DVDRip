@@ -249,11 +249,11 @@
     <string name="source_titles_header">Titels</string>
     <string name="source_title_name">Titel %1$d</string>
     <string name="source_main_title">Hoofdfilm</string>
-    <string name="source_titles_footer">De langste titel is meestal de film. Korte titels zijn menu’s, trailers of extra’s.</string>
+    <string name="source_titles_footer">De hoofdfilm is de langste titel die zijn scènes in volgorde afspeelt; dvd’s met lokkertitels verstoppen de film tussen kopieën met de scènes door elkaar. Korte titels zijn menu’s, trailers of extra’s.</string>
     <string name="source_metadata_header">Metadata</string>
     <string name="source_metadata_choose">Titel en jaar kiezen</string>
     <string name="source_audio_header">Audio</string>
-    <string name="source_audio_footer">Alle audiosporen gaan mee in het bestand, Nederlands en Engels eerst. Het eerste speelt standaard.</string>
+    <string name="source_audio_footer">Aangevinkte sporen gaan in deze volgorde mee, Nederlands en Engels eerst.</string>
     <string name="source_audio_none">Deze titel heeft geen audio.</string>
     <string name="source_language_unknown">Onbekende taal</string>
     <string name="source_default_track">Standaard</string>
@@ -328,5 +328,25 @@
     <plurals name="source_angles">
         <item quantity="one">%d camerahoek</item>
         <item quantity="other">%d camerahoeken</item>
+    </plurals>
+    <string name="source_default_audio">Standaardspoor</string>
+    <string name="source_default_audio_footer">Speelt als eerste. Spelers en Plex kunnen altijd naar een ander spoor wisselen.</string>
+    <string name="source_audio_none_chosen">Er is geen audiospoor aangevinkt: het bestand wordt stil.</string>
+    <string name="source_subtitles_header">Ondertitels</string>
+    <string name="source_subtitles_footer">Dvd-ondertitels zijn afbeeldingen en gaan mee als VobSub. Geen enkele staat standaard aan; Plex kiest ze volgens je taalinstellingen.</string>
+    <string name="source_output_size">Geschatte grootte</string>
+    <string name="source_output_free">Vrij</string>
+    <string name="source_not_enough_space">Niet genoeg ruimte: deze rip heeft ongeveer %1$s nodig (met 10 %% marge) en er is %2$s vrij.</string>
+    <string name="source_title_scrambled">scènes door elkaar</string>
+    <string name="source_show_fewer_titles">Minder titels tonen</string>
+    <string name="subtitle_forced">Geforceerd</string>
+    <string name="subtitle_captions">Doven en slechthorenden</string>
+    <string name="subtitle_large">Grote letters</string>
+    <string name="subtitle_children">Voor kinderen</string>
+    <string name="rip_result_subtitles">Ondertitels</string>
+    <string name="rip_failure_no_space_numbers">De rip heeft ongeveer %1$s nodig en er is %2$s vrij in de lokale map.</string>
+    <plurals name="source_show_all_titles">
+        <item quantity="one">De titel tonen</item>
+        <item quantity="other">Alle %d titels tonen</item>
     </plurals>
 </resources>

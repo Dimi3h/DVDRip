@@ -22,18 +22,28 @@ internal object NativeRip {
     /** `{"titles":[…]}` or `{"error":"…"}`. */
     @JvmStatic external fun titles(session: Long): ByteArray
 
-    /** The engine's JSON report; see `dr_rip.h`. [outputFd] stays the caller's. */
+    /**
+     * The engine's JSON report; see `dr_rip.h`. Tracks come as parallel arrays in output order:
+     * stream id, `DR_TRACK_` flags ([be.discrip.core.dvd.TrackFlags]), language and name.
+     * [outputFd] stays the caller's.
+     */
     @JvmStatic external fun rip(
         session: Long,
         title: Int,
         angle: Int,
         audioStreamIds: IntArray,
+        audioFlags: IntArray,
         audioLanguages: Array<ByteArray?>,
         audioNames: Array<ByteArray?>,
-        defaultAudio: Int,
+        subtitleStreamIds: IntArray,
+        subtitleFlags: IntArray,
+        subtitleLanguages: Array<ByteArray?>,
+        subtitleNames: Array<ByteArray?>,
         lpcmToFlac: Boolean,
         movieTitle: ByteArray?,
         releaseDate: ByteArray?,
+        tagKeys: Array<ByteArray?>,
+        tagValues: Array<ByteArray?>,
         chapterNames: Array<ByteArray?>,
         outputFd: Int,
         listener: NativeProgress,

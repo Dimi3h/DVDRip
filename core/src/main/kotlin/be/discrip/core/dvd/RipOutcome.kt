@@ -32,6 +32,7 @@ sealed interface RipOutcome {
         val durationMs: Long,
         val chapterStartsMs: List<Long>,
         val audioTracks: Int,
+        val subtitleTracks: Int,
         val badSectors: List<BadSectors>,
         val warnings: List<String>,
     ) : RipOutcome {
@@ -50,6 +51,7 @@ sealed interface RipOutcome {
             val durationMs: Long = 0,
             val chapterStartsMs: List<Long> = emptyList(),
             val audioTracks: Int = 0,
+            val subtitleTracks: Int = 0,
             val badSectors: List<List<Long>> = emptyList(),
             val warnings: List<String> = emptyList(),
         )
@@ -81,6 +83,7 @@ sealed interface RipOutcome {
                 durationMs = report.durationMs,
                 chapterStartsMs = report.chapterStartsMs,
                 audioTracks = report.audioTracks,
+                subtitleTracks = report.subtitleTracks,
                 badSectors = report.badSectors.filter { it.size == 2 }.map { BadSectors(it[0], it[1]) },
                 warnings = report.warnings,
             )
@@ -93,9 +96,12 @@ data class MkvSummary(
     val durationMs: Long,
     val streams: List<MkvStream>,
     val chapterStartsMs: List<Long>,
+    /** Global tags as FFmpeg reads them back ("title", "DATE_RELEASED", "IMDB", …). */
+    val tags: Map<String, String> = emptyMap(),
 ) {
     val video: List<MkvStream> get() = streams.filter { it.type == "video" }
     val audio: List<MkvStream> get() = streams.filter { it.type == "audio" }
+    val subtitles: List<MkvStream> get() = streams.filter { it.type == "subtitle" }
 
     companion object {
         @Serializable
@@ -105,6 +111,7 @@ data class MkvSummary(
             val durationMs: Long = 0,
             val streams: List<MkvStream> = emptyList(),
             val chapterStartsMs: List<Long> = emptyList(),
+            val tags: Map<String, String> = emptyMap(),
         )
 
         /** The summary, or null with the reason when the file could not be read back. */
@@ -117,7 +124,7 @@ data class MkvSummary(
                 return Result.failure(DvdReadException("Unexpected probe result: ${e.message}"))
             }
             if (!probe.ok) return Result.failure(DvdReadException(probe.message ?: "The file cannot be read"))
-            return Result.success(MkvSummary(probe.durationMs, probe.streams, probe.chapterStartsMs))
+            return Result.success(MkvSummary(probe.durationMs, probe.streams, probe.chapterStartsMs, probe.tags))
         }
     }
 }

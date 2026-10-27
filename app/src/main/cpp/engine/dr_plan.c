@@ -296,6 +296,18 @@ static void title_json(dr_json *json, const dr_plan *plan, const title_info_t *i
         time += plan->cells[i].duration;
     }
     dr_json_end_array(json);
+
+    /* The cells in playback order, for telling the film from decoy titles. */
+    dr_json_key(json, "playback");
+    dr_json_begin_array(json);
+    for (int i = 0; i < plan->cell_count; i++) {
+        dr_json_begin_object(json);
+        dr_json_key(json, "first"); dr_json_int(json, plan->cells[i].first_sector);
+        dr_json_key(json, "last"); dr_json_int(json, plan->cells[i].last_sector);
+        dr_json_key(json, "durationMs"); dr_json_int(json, plan->cells[i].duration / 90);
+        dr_json_end_object(json);
+    }
+    dr_json_end_array(json);
     dr_json_end_object(json);
 }
 

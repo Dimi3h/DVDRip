@@ -10,26 +10,30 @@ import be.discrip.core.dvd.RipOutcome
 import java.io.Closeable
 import java.io.File
 
-/** One audio track of a rip, in output order. */
-data class RipAudioTrack(
+/** One audio or subtitle track of a rip, in output order. */
+data class RipTrack(
     val streamId: Int,
     /** ISO 639-2/B code, or null for "und". */
     val language: String?,
     /** Track name shown by players, or null. */
     val name: String?,
-    val isDefault: Boolean,
+    /** [be.discrip.core.dvd.TrackFlags]. */
+    val flags: Int,
 )
 
 /** What to rip and how to tag it. */
 data class RipRequest(
     val title: Int,
     val angle: Int = 1,
-    val audio: List<RipAudioTrack>,
+    val audio: List<RipTrack>,
+    val subtitles: List<RipTrack> = emptyList(),
     val lpcmToFlac: Boolean,
     val movieTitle: String?,
     /** "YYYY" or "YYYY-MM-DD". */
     val releaseDate: String?,
     val chapterNames: List<String>,
+    /** More Matroska tags of the film, such as IMDB, TMDB and SUMMARY. */
+    val tags: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -72,18 +76,23 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
                 if (isCancelled()) NativeRip.cancel(handle)
                 onProgress(done, total, bytes, position)
             }
-            val defaultIndex = request.audio.indexOfFirst { it.isDefault }
             val report = NativeRip.rip(
                 session = handle,
                 title = request.title,
                 angle = request.angle,
                 audioStreamIds = request.audio.map { it.streamId }.toIntArray(),
+                audioFlags = request.audio.map { it.flags }.toIntArray(),
                 audioLanguages = request.audio.map { it.language?.encodeToByteArray() }.toTypedArray(),
                 audioNames = request.audio.map { it.name?.encodeToByteArray() }.toTypedArray(),
-                defaultAudio = defaultIndex,
+                subtitleStreamIds = request.subtitles.map { it.streamId }.toIntArray(),
+                subtitleFlags = request.subtitles.map { it.flags }.toIntArray(),
+                subtitleLanguages = request.subtitles.map { it.language?.encodeToByteArray() }.toTypedArray(),
+                subtitleNames = request.subtitles.map { it.name?.encodeToByteArray() }.toTypedArray(),
                 lpcmToFlac = request.lpcmToFlac,
                 movieTitle = request.movieTitle?.encodeToByteArray(),
                 releaseDate = request.releaseDate?.encodeToByteArray(),
+                tagKeys = request.tags.keys.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
+                tagValues = request.tags.values.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 chapterNames = request.chapterNames.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 outputFd = output.fd,
                 listener = listener,

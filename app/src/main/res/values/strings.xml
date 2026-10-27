@@ -251,11 +251,11 @@
     <string name="source_titles_header">Titles</string>
     <string name="source_title_name">Title %1$d</string>
     <string name="source_main_title">Main feature</string>
-    <string name="source_titles_footer">The longest title is usually the film. Short titles are menus, trailers or extras.</string>
+    <string name="source_titles_footer">The main feature is the longest title that plays its scenes in order; discs with decoy titles hide the film among copies with the scenes shuffled. Short titles are menus, trailers or extras.</string>
     <string name="source_metadata_header">Metadata</string>
     <string name="source_metadata_choose">Choose title and year</string>
     <string name="source_audio_header">Audio</string>
-    <string name="source_audio_footer">All audio tracks go into the file, Dutch and English first. The first one plays by default.</string>
+    <string name="source_audio_footer">Checked tracks go into the file in this order, Dutch and English first.</string>
     <string name="source_audio_none">This title has no audio.</string>
     <string name="source_language_unknown">Unknown language</string>
     <string name="source_default_track">Default</string>
@@ -330,5 +330,25 @@
     <plurals name="source_angles">
         <item quantity="one">%d angle</item>
         <item quantity="other">%d angles</item>
+    </plurals>
+    <string name="source_default_audio">Default track</string>
+    <string name="source_default_audio_footer">Plays first. Players and Plex can switch to another track at any time.</string>
+    <string name="source_audio_none_chosen">No audio track is checked: the file will be silent.</string>
+    <string name="source_subtitles_header">Subtitles</string>
+    <string name="source_subtitles_footer">DVD subtitles are pictures and go in as VobSub. None is switched on by default; Plex picks them by your language settings.</string>
+    <string name="source_output_size">Estimated size</string>
+    <string name="source_output_free">Free</string>
+    <string name="source_not_enough_space">Not enough space: this rip needs about %1$s (with a 10 %% margin) and %2$s is free.</string>
+    <string name="source_title_scrambled">scenes out of order</string>
+    <string name="source_show_fewer_titles">Show fewer titles</string>
+    <string name="subtitle_forced">Forced</string>
+    <string name="subtitle_captions">Deaf and hard of hearing</string>
+    <string name="subtitle_large">Large print</string>
+    <string name="subtitle_children">For children</string>
+    <string name="rip_result_subtitles">Subtitles</string>
+    <string name="rip_failure_no_space_numbers">The rip needs about %1$s and %2$s is free in the local folder.</string>
+    <plurals name="source_show_all_titles">
+        <item quantity="one">Show the title</item>
+        <item quantity="other">Show all %d titles</item>
     </plurals>
 </resources>

@@ -5,9 +5,11 @@ import androidx.compose.ui.res.stringResource
 import be.discrip.R
 import be.discrip.core.dvd.AudioCodec
 import be.discrip.core.dvd.AudioPurpose
-import be.discrip.core.dvd.AudioTrackPlan
+import be.discrip.core.dvd.DvdAudioStream
+import be.discrip.core.dvd.DvdSubtitleStream
 import be.discrip.core.dvd.RipFailure
 import be.discrip.core.format.Formats
+import be.discrip.rip.RipLabels
 import be.discrip.rip.RipState
 import be.discrip.ui.settings.currentLocale
 import java.text.NumberFormat
@@ -38,21 +40,31 @@ fun codecName(codec: AudioCodec): String = when (codec) {
 }
 
 /** "Dolby Digital 5.1", "LPCM 2.0 → FLAC". */
-fun trackFormat(track: AudioTrackPlan, lpcmToFlac: Boolean): String {
-    val base = codecName(track.codec) + " " + channelLayout(track.channels)
-    return if (track.codec == AudioCodec.LPCM && lpcmToFlac) "$base → FLAC" else base
+fun audioFormat(stream: DvdAudioStream, lpcmToFlac: Boolean): String {
+    val base = codecName(stream.codec) + " " + channelLayout(stream.channels)
+    return if (stream.codec == AudioCodec.LPCM && lpcmToFlac) "$base → FLAC" else base
 }
 
+/** "Nederlands", "Engels · Commentaar". */
 @Composable
-fun trackTitle(track: AudioTrackPlan): String {
-    val language = languageName(track.discLanguage, currentLocale()) ?: stringResource(R.string.source_language_unknown)
-    val purpose = when (track.purpose) {
+fun audioTitle(stream: DvdAudioStream): String {
+    val language = languageName(stream.language, currentLocale()) ?: stringResource(R.string.source_language_unknown)
+    val purpose = when (stream.purpose) {
         AudioPurpose.VISUALLY_IMPAIRED -> stringResource(R.string.track_audio_description)
         AudioPurpose.COMMENTARY, AudioPurpose.ALTERNATE_COMMENTARY -> stringResource(R.string.track_commentary)
         AudioPurpose.NORMAL, AudioPurpose.UNSPECIFIED -> null
     }
     return if (purpose != null) "$language · $purpose" else language
 }
+
+/** "Nederlands", or "Onbekende taal". */
+@Composable
+fun subtitleTitle(stream: DvdSubtitleStream): String =
+    languageName(stream.language, currentLocale()) ?: stringResource(R.string.source_language_unknown)
+
+/** "Geforceerd", "Doven en slechthorenden"; null for plain subtitles. */
+@Composable
+fun subtitleKind(stream: DvdSubtitleStream): String? = RipLabels.subtitlePurposeName(stream.purpose)?.let { stringResource(it) }
 
 fun percent(fraction: Float, locale: Locale): String = NumberFormat.getPercentInstance(locale).format(fraction.toDouble())
 
