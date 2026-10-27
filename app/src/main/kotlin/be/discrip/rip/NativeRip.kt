@@ -24,8 +24,8 @@ internal object NativeRip {
 
     /**
      * The engine's JSON report; see `dr_rip.h`. Tracks come as parallel arrays in output order:
-     * stream id, `DR_TRACK_` flags ([be.discrip.core.dvd.TrackFlags]), language and name.
-     * [outputFd] stays the caller's.
+     * stream id, `DR_TRACK_` flags ([be.discrip.core.dvd.TrackFlags]), language and name. The MKV
+     * goes to [output] when given, else to [outputFd]; both stay the caller's.
      */
     @JvmStatic external fun rip(
         session: Long,
@@ -46,6 +46,7 @@ internal object NativeRip {
         tagValues: Array<ByteArray?>,
         chapterNames: Array<ByteArray?>,
         outputFd: Int,
+        output: NativeFile?,
         listener: NativeProgress,
     ): ByteArray
 
@@ -53,8 +54,8 @@ internal object NativeRip {
 
     @JvmStatic external fun close(session: Long)
 
-    /** Reads the Matroska file on [fd] back; see `dr_probe.h`. [fd] stays the caller's. */
-    @JvmStatic external fun probe(fd: Int): ByteArray
+    /** Reads a Matroska file back, [file] when given, else the one on [fd]; see `dr_probe.h`. Both stay the caller's. */
+    @JvmStatic external fun probe(fd: Int, file: NativeFile?): ByteArray
 }
 
 /** Called from native code about twice a second while a rip runs. */

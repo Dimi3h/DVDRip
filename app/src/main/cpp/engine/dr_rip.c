@@ -14,8 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define MAX_TRACKS 8
 #define MAX_SUBTITLES 32
@@ -77,6 +75,8 @@ typedef struct rip {
     int subtitle_count;
 
     int write_errno;
+    /* Where the muxer's next write lands in options->output. */
+    int64_t output_position;
     int64_t last_progress;
     char warnings[MAX_WARNINGS][160];
     int warning_count;
@@ -117,32 +117,45 @@ static int read_input(void *opaque, uint8_t *buffer, int size) {
 
 static int write_output(void *opaque, const uint8_t *buffer, int size) {
     rip *r = opaque;
-    int done = 0;
-    while (done < size) {
-        ssize_t written = write(r->options->output_fd, buffer + done, (size_t) (size - done));
-        if (written < 0) {
-            if (errno == EINTR) continue;
-            r->write_errno = errno;
-            return AVERROR(errno);
-        }
-        done += (int) written;
+    const dr_file *output = &r->options->output;
+    int result = output->write(output->opaque, buffer, size, r->output_position);
+    if (result < 0) {
+        r->write_errno = -result;
+        return result;
     }
+    r->output_position += size;
     return size;
 }
 
+/* The muxer goes back to fill in sizes, the duration and the index once the end is written. */
 static int64_t seek_output(void *opaque, int64_t offset, int whence) {
     rip *r = opaque;
-    if (whence == AVSEEK_SIZE) {
-        struct stat info;
-        return fstat(r->options->output_fd, &info) == 0 ? (int64_t) info.st_size : AVERROR(errno);
+    const dr_file *output = &r->options->output;
+    if (whence == AVSEEK_SIZE) return output->size(output->opaque);
+    int64_t base;
+    switch (whence & ~AVSEEK_FORCE) {
+        case SEEK_SET:
+            base = 0;
+            break;
+        case SEEK_CUR:
+            base = r->output_position;
+            break;
+        case SEEK_END:
+            base = output->size(output->opaque);
+            if (base < 0) return base;
+            break;
+        default:
+            return AVERROR(EINVAL);
     }
-    off_t position = lseek(r->options->output_fd, (off_t) offset, whence & ~AVSEEK_FORCE);
-    return position < 0 ? AVERROR(errno) : (int64_t) position;
+    if (base + offset < 0) return AVERROR(EINVAL);
+    r->output_position = base + offset;
+    return r->output_position;
 }
 
 static int64_t output_size(const rip *r) {
-    struct stat info;
-    return fstat(r->options->output_fd, &info) == 0 ? (int64_t) info.st_size : 0;
+    const dr_file *output = &r->options->output;
+    int64_t size = output->size(output->opaque);
+    return size >= 0 ? size : 0;
 }
 
 /* Offset to line up a packet read at position; packets without a position keep the last one. */

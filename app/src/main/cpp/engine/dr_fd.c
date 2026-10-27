@@ -1,6 +1,7 @@
 #include "dr_fd.h"
 
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -64,4 +65,39 @@ int dr_fd_file_close(void *file) {
     int result = close(((fd_file *) file)->fd);
     free(file);
     return result;
+}
+
+static int fd_of(void *opaque) {
+    return (int) (intptr_t) opaque;
+}
+
+static int fd_write(void *opaque, const uint8_t *data, int size, int64_t position) {
+    int done = 0;
+    while (done < size) {
+        ssize_t written = pwrite(fd_of(opaque), data + done, (size_t) (size - done), (off_t) (position + done));
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        if (written == 0) return -EIO;
+        done += (int) written;
+    }
+    return 0;
+}
+
+static int fd_read(void *opaque, uint8_t *buffer, int size, int64_t position) {
+    ssize_t got;
+    do {
+        got = pread(fd_of(opaque), buffer, (size_t) size, (off_t) position);
+    } while (got < 0 && errno == EINTR);
+    return got < 0 ? -errno : (int) got;
+}
+
+static int64_t fd_size(void *opaque) {
+    struct stat info;
+    return fstat(fd_of(opaque), &info) == 0 ? (int64_t) info.st_size : -errno;
+}
+
+dr_file dr_fd_as_file(int fd) {
+    return (dr_file) {(void *) (intptr_t) fd, fd_write, fd_read, fd_size};
 }

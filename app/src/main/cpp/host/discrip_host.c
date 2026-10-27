@@ -3,11 +3,15 @@
  * a phone. It reaches the disc the way the app does: an image through block-read callbacks, a
  * VIDEO_TS folder through filesystem callbacks.
  *
- *   discrip_host probe <file.mkv>
+ *   discrip_host probe <file.mkv> [--callbacks]
  *   discrip_host titles <image.iso | --dir folder>
  *   discrip_host rip <image.iso | --dir folder> <title> <out.mkv> [--audio id[:lang[:name]],...]
  *                [--default-audio id] [--flac] [--movie-title text] [--date yyyy] [--cancel-after blocks]
  *                [--subs id[:lang[:name]],...] [--forced-sub id] [--tag KEY=value]... [--bad-blocks lba:count]
+ *                [--callbacks] [--fail-write-at bytes[:nospace]]
+ *
+ * --callbacks writes and reads the MKV the way the app reaches the NAS: through callbacks, which
+ * here return short reads; --fail-write-at makes them fail once the file would pass that size.
  *
  * Output is the engine's JSON on stdout; progress and log lines go to stderr.
  */
@@ -130,6 +134,39 @@ static dvd_reader_filesystem_h *tree_filesystem(const char *root) {
     return fs;
 }
 
+/* The MKV through callbacks instead of a descriptor, standing in for the app's NAS client. */
+typedef struct callback_file {
+    int fd;
+    int64_t fail_at; /* -1: never */
+    int fail_errno;
+} callback_file;
+
+/* Reads return at most this much, as SMB reads may. */
+#define SHORT_READ 4093
+
+static int callback_write(void *opaque, const uint8_t *data, int size, int64_t position) {
+    callback_file *f = opaque;
+    if (f->fail_at >= 0 && position + size > f->fail_at) return -f->fail_errno;
+    dr_file file = dr_fd_as_file(f->fd);
+    return file.write(file.opaque, data, size, position);
+}
+
+static int callback_read(void *opaque, uint8_t *buffer, int size, int64_t position) {
+    callback_file *f = opaque;
+    dr_file file = dr_fd_as_file(f->fd);
+    return file.read(file.opaque, buffer, size < SHORT_READ ? size : SHORT_READ, position);
+}
+
+static int64_t callback_size(void *opaque) {
+    callback_file *f = opaque;
+    dr_file file = dr_fd_as_file(f->fd);
+    return file.size(file.opaque);
+}
+
+static dr_file callback_output(callback_file *f) {
+    return (dr_file) {f, callback_write, callback_read, callback_size};
+}
+
 static image source_image = {.fd_image = {-1, 0}};
 
 static dr_dvd *open_source(int argc, char **argv, int *next) {
@@ -178,7 +215,9 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Cannot open %s: %s\n", argv[2], strerror(errno));
             return 1;
         }
-        char *json = dr_probe(fd);
+        callback_file callbacks = {fd, -1, 0};
+        dr_file file = argc > 3 && strcmp(argv[3], "--callbacks") == 0 ? callback_output(&callbacks) : dr_fd_as_file(fd);
+        char *json = dr_probe(&file);
         close(fd);
         printf("%s\n", json);
         int ok = strstr(json, "\"ok\":true") != NULL;
@@ -212,9 +251,18 @@ int main(int argc, char **argv) {
         const char *tag_values[8];
         int default_audio = -1;
         int forced_subtitle = -1;
+        int use_callbacks = 0;
+        callback_file callbacks = {-1, -1, 0};
         for (int i = next + 2; i < argc; i++) {
             if (strcmp(argv[i], "--flac") == 0) {
                 options.lpcm_to_flac = 1;
+            } else if (strcmp(argv[i], "--callbacks") == 0) {
+                use_callbacks = 1;
+            } else if (strcmp(argv[i], "--fail-write-at") == 0 && i + 1 < argc) {
+                char *end = NULL;
+                use_callbacks = 1;
+                callbacks.fail_at = strtoll(argv[++i], &end, 0);
+                callbacks.fail_errno = end != NULL && strcmp(end, ":nospace") == 0 ? ENOSPC : EIO;
             } else if (strcmp(argv[i], "--movie-title") == 0 && i + 1 < argc) {
                 options.movie_title = argv[++i];
             } else if (strcmp(argv[i], "--date") == 0 && i + 1 < argc) {
@@ -272,8 +320,10 @@ int main(int argc, char **argv) {
         options.subtitles = subtitles;
         options.tag_keys = tag_keys;
         options.tag_values = tag_values;
-        options.output_fd = open(output, O_RDWR | O_CREAT | O_TRUNC, 0644);
-        if (options.output_fd < 0) {
+        int output_fd = open(output, O_RDWR | O_CREAT | O_TRUNC, 0644);
+        callbacks.fd = output_fd;
+        options.output = use_callbacks ? callback_output(&callbacks) : dr_fd_as_file(output_fd);
+        if (output_fd < 0) {
             fprintf(stderr, "Cannot create %s: %s\n", output, strerror(errno));
             status = 1;
         } else {
@@ -286,7 +336,7 @@ int main(int argc, char **argv) {
             }
             status = strstr(report, "\"ok\":true") != NULL ? 0 : 1;
             free(report);
-            close(options.output_fd);
+            close(output_fd);
         }
     } else {
         fprintf(stderr, "Unknown command\n");

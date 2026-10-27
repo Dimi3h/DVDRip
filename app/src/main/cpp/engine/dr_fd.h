@@ -1,11 +1,12 @@
 /*
  * Plain file descriptors as DVD sources: an image read with pread(), and the files of a
- * filesystem callback set, once the caller has opened them.
+ * filesystem callback set, once the caller has opened them. Also the MKV a rip writes.
  */
 #ifndef DR_FD_H
 #define DR_FD_H
 
 #include "dr_common.h"
+#include "dr_file.h"
 
 #include <dvdread/dvd_filesystem.h>
 
@@ -25,5 +26,8 @@ void *dr_fd_file_wrap(int fd);
 ssize_t dr_fd_file_read(void *file, char *buffer, size_t size);
 off64_t dr_fd_file_seek(void *file, off64_t offset, int whence);
 int dr_fd_file_close(void *file);
+
+/* A dr_file over fd, which stays the caller's: pwrite(), pread() and fstat(). */
+dr_file dr_fd_as_file(int fd);
 
 #endif

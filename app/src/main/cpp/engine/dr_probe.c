@@ -4,30 +4,44 @@
 
 #include <errno.h>
 #include <libavformat/avformat.h>
-#include <unistd.h>
 
 #define BUFFER_SIZE (64 * 1024)
 
-static int read_fd(void *opaque, uint8_t *buffer, int size) {
-    int fd = *(int *) opaque;
-    ssize_t got;
-    do {
-        got = read(fd, buffer, (size_t) size);
-    } while (got < 0 && errno == EINTR);
-    if (got < 0) return AVERROR(errno);
-    return got == 0 ? AVERROR_EOF : (int) got;
+typedef struct input {
+    const dr_file *file;
+    int64_t position;
+} input;
+
+static int read_input(void *opaque, uint8_t *buffer, int size) {
+    input *in = opaque;
+    int got = in->file->read(in->file->opaque, buffer, size, in->position);
+    if (got < 0) return got;
+    if (got == 0) return AVERROR_EOF;
+    in->position += got;
+    return got;
 }
 
-static int64_t seek_fd(void *opaque, int64_t offset, int whence) {
-    int fd = *(int *) opaque;
-    if (whence == AVSEEK_SIZE) {
-        off_t current = lseek(fd, 0, SEEK_CUR);
-        off_t end = lseek(fd, 0, SEEK_END);
-        lseek(fd, current, SEEK_SET);
-        return end;
+static int64_t seek_input(void *opaque, int64_t offset, int whence) {
+    input *in = opaque;
+    if (whence == AVSEEK_SIZE) return in->file->size(in->file->opaque);
+    int64_t base;
+    switch (whence & ~AVSEEK_FORCE) {
+        case SEEK_SET:
+            base = 0;
+            break;
+        case SEEK_CUR:
+            base = in->position;
+            break;
+        case SEEK_END:
+            base = in->file->size(in->file->opaque);
+            if (base < 0) return base;
+            break;
+        default:
+            return AVERROR(EINVAL);
     }
-    off_t position = lseek(fd, (off_t) offset, whence & ~AVSEEK_FORCE);
-    return position < 0 ? AVERROR(errno) : (int64_t) position;
+    if (base + offset < 0) return AVERROR(EINVAL);
+    in->position = base + offset;
+    return in->position;
 }
 
 static char *failed(const char *message) {
@@ -40,12 +54,11 @@ static char *failed(const char *message) {
     return dr_json_take(&json);
 }
 
-char *dr_probe(int fd) {
-    int local_fd = fd;
-    if (lseek(local_fd, 0, SEEK_SET) < 0) return failed("The file cannot be read from its start");
+char *dr_probe(const dr_file *file) {
+    input in = {file, 0};
     AVFormatContext *format = avformat_alloc_context();
     uint8_t *buffer = av_malloc(BUFFER_SIZE);
-    AVIOContext *io = buffer != NULL ? avio_alloc_context(buffer, BUFFER_SIZE, 0, &local_fd, read_fd, NULL, seek_fd) : NULL;
+    AVIOContext *io = buffer != NULL ? avio_alloc_context(buffer, BUFFER_SIZE, 0, &in, read_input, NULL, seek_input) : NULL;
     if (format == NULL || io == NULL) {
         if (io == NULL) av_free(buffer);
         avio_context_free(&io);

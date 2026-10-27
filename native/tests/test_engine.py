@@ -188,6 +188,32 @@ class EngineTest(unittest.TestCase):
         report = host("rip", ISO, "1", "/dev/full", "--audio", "0x80", check=False)
         self.assertEqual("no_space", report["error"])
 
+    def test_writing_and_reading_through_callbacks_matches_a_descriptor(self):
+        # The app writes to the NAS through callbacks, and reads the file back through them.
+        direct = self.output("descriptor.mkv")
+        callbacks = self.output("callbacks.mkv")
+        arguments = ["--audio", "0x80:eng,0xa0:dut", "--subs", "0x20:dut", "--movie-title", "Testfilm"]
+        host("rip", ISO, "1", direct, *arguments)
+        report = host("rip", ISO, "1", callbacks, *arguments, "--callbacks")
+        self.assertEqual(os.path.getsize(callbacks), report["outputBytes"])
+        entries = "packet=stream_index,pts_time,size"
+        self.assertEqual(probe(direct, entries), probe(callbacks, entries))
+
+        through_descriptor = host("probe", callbacks)
+        self.assertTrue(through_descriptor["ok"])
+        self.assertEqual("Testfilm", through_descriptor["tags"]["title"])
+        # Short reads, as SMB may return, change nothing.
+        self.assertEqual(through_descriptor, host("probe", callbacks, "--callbacks"))
+
+    def test_a_failing_write_callback_stops_the_rip(self):
+        size = host("rip", ISO, "1", self.output("whole.mkv"), "--audio", "0x80")["outputBytes"]
+        halfway = str(size // 2)
+        report = host("rip", ISO, "1", self.output("broken.mkv"), "--audio", "0x80", "--fail-write-at", halfway, check=False)
+        self.assertEqual("write_failed", report["error"])
+        report = host("rip", ISO, "1", self.output("full.mkv"), "--audio", "0x80", "--fail-write-at", f"{halfway}:nospace",
+                      check=False)
+        self.assertEqual("no_space", report["error"])
+
     def test_subtitles_become_vobsub_tracks_on_the_same_timeline(self):
         path = self.output("subs.mkv")
         report = host("rip", ISO, "1", path, "--audio", "0x80:eng", "--subs", "0x20:dut,0x21:eng:Forced", "--forced-sub", "0x21")

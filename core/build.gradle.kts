@@ -25,6 +25,7 @@ dependencies {
     api(libs.kotlinx.serialization.json)
     api(libs.okhttp)
     implementation(libs.okhttp.coroutines)
+    implementation(libs.smbj)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -35,7 +36,25 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("smb")
+    }
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+// The NAS client against a real Samba server, which scripts/samba-test-server.sh starts; the
+// tests fail when its DISCRIP_SMB_* environment is missing.
+val smbTest by tasks.registering(Test::class) {
+    description = "Tests the NAS client against the Samba server in the DISCRIP_SMB_* environment."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("smb")
+    }
     testLogging {
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

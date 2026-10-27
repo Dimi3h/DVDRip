@@ -2,12 +2,13 @@
  * Rips one title into Matroska: the VOBU reader feeds FFmpeg's MPEG-PS demuxer through a custom
  * AVIOContext, video, compressed audio and subpictures are copied, LPCM is re-encoded losslessly
  * (PCM, or FLAC when asked), timestamps are lined up across VOB boundaries, chapters come from
- * the cells where programs start, and the file is written to a caller's file descriptor.
+ * the cells where programs start, and the file is written through the caller's dr_file.
  */
 #ifndef DR_RIP_H
 #define DR_RIP_H
 
 #include "dr_common.h"
+#include "dr_file.h"
 
 #include <dvdread/dvd_reader.h>
 
@@ -62,8 +63,8 @@ typedef struct dr_rip_options {
     /* Names for chapters 1..chapter_name_count; others get "Chapter NN". */
     const char *const *chapter_names;
     int chapter_name_count;
-    /* Open for writing and seekable; stays owned by the caller. */
-    int output_fd;
+    /* Where the file goes, written from position 0; stays the caller's. */
+    dr_file output;
 } dr_rip_options;
 
 typedef struct dr_progress {

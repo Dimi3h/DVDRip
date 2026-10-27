@@ -21,3 +21,13 @@
 -keep interface be.discrip.rip.NativeProgress {
     void onProgress(long, long, long, long);
 }
+-keep interface be.discrip.rip.NativeFile {
+    int write(byte[], int, long);
+    int read(byte[], int, long);
+    long size();
+}
+-keep class * implements be.discrip.rip.NativeFile {
+    int write(byte[], int, long);
+    int read(byte[], int, long);
+    long size();
+}

@@ -3,12 +3,14 @@
  *
  * A session is one open DVD: an image read with pread() on a descriptor Kotlin hands over, or a
  * VIDEO_TS folder reached through a Kotlin NativeFolder (stat, list, open) whose files are then
- * read here, on the descriptors it opens. Text crosses the boundary as UTF-8 byte arrays because
- * JNI's own string functions use modified UTF-8.
+ * read here, on the descriptors it opens. The MKV goes to a descriptor, or through a Kotlin
+ * NativeFile (the NAS). Text crosses the boundary as UTF-8 byte arrays because JNI's own string
+ * functions use modified UTF-8.
  *
  * libdvdread picks its input functions through process-wide pointers, so one session at a time.
  */
 #include <android/log.h>
+#include <errno.h>
 #include <jni.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -279,6 +281,78 @@ static dvd_reader_filesystem_h *folder_filesystem(JNIEnv *env, jobject target) {
     return fs;
 }
 
+/* --- Files through Kotlin (NativeFile), such as the MKV on the NAS -------------------------------- */
+
+typedef struct java_file {
+    JNIEnv *env;
+    jobject target;
+    jmethodID write;
+    jmethodID read;
+    jmethodID size;
+    /* Carries the bytes both ways; kept between calls and grown as needed. */
+    jbyteArray buffer;
+    jsize capacity;
+} java_file;
+
+/* Finds the NativeFile methods of target; false (exception pending) when one is missing. */
+static int java_file_init(JNIEnv *env, jobject target, java_file *out) {
+    *out = (java_file) {.env = env, .target = target};
+    jclass type = (*env)->GetObjectClass(env, target);
+    out->write = (*env)->GetMethodID(env, type, "write", "([BIJ)I");
+    out->read = out->write != NULL ? (*env)->GetMethodID(env, type, "read", "([BIJ)I") : NULL;
+    out->size = out->read != NULL ? (*env)->GetMethodID(env, type, "size", "()J") : NULL;
+    (*env)->DeleteLocalRef(env, type);
+    return out->size != NULL;
+}
+
+static void java_file_release(java_file *f) {
+    if (f->buffer != NULL) (*f->env)->DeleteLocalRef(f->env, f->buffer);
+    f->buffer = NULL;
+    f->capacity = 0;
+}
+
+/* Makes the buffer hold at least size bytes; false when memory runs out. */
+static int java_file_reserve(java_file *f, int size) {
+    if (f->buffer != NULL && f->capacity >= size) return 1;
+    java_file_release(f);
+    f->buffer = (*f->env)->NewByteArray(f->env, size);
+    if (f->buffer == NULL) {
+        failed_call(f->env);
+        return 0;
+    }
+    f->capacity = size;
+    return 1;
+}
+
+/* NativeFile reports failures as negative errno values; an exception that escapes it is an EIO. */
+static int java_file_write(void *opaque, const uint8_t *data, int size, int64_t position) {
+    java_file *f = opaque;
+    if (!java_file_reserve(f, size)) return -ENOMEM;
+    (*f->env)->SetByteArrayRegion(f->env, f->buffer, 0, size, (const jbyte *) data);
+    jint result = (*f->env)->CallIntMethod(f->env, f->target, f->write, f->buffer, size, (jlong) position);
+    if (failed_call(f->env)) return -EIO;
+    return result < 0 ? result : 0;
+}
+
+static int java_file_read(void *opaque, uint8_t *buffer, int size, int64_t position) {
+    java_file *f = opaque;
+    if (!java_file_reserve(f, size)) return -ENOMEM;
+    jint got = (*f->env)->CallIntMethod(f->env, f->target, f->read, f->buffer, size, (jlong) position);
+    if (failed_call(f->env) || got > size) return -EIO;
+    if (got > 0) (*f->env)->GetByteArrayRegion(f->env, f->buffer, 0, got, (jbyte *) buffer);
+    return got;
+}
+
+static int64_t java_file_size(void *opaque) {
+    java_file *f = opaque;
+    jlong size = (*f->env)->CallLongMethod(f->env, f->target, f->size);
+    return failed_call(f->env) ? -EIO : (int64_t) size;
+}
+
+static dr_file java_file_as_file(java_file *f) {
+    return (dr_file) {f, java_file_write, java_file_read, java_file_size};
+}
+
 /* --- Entry points ----------------------------------------------------------------------------- */
 
 JNIEXPORT void JNICALL
@@ -428,9 +502,9 @@ static void release_tracks(JNIEnv *env, jintArray ids, jintArray flags, track_ar
 }
 
 /*
- * Rips a title to output_fd (which stays the caller's). Tracks are given in output order, as
- * parallel arrays: stream id, DR_TRACK_ flags, language (ISO 639-2/B) and name, the last two
- * possibly null.
+ * Rips a title to output_file when given, else to output_fd; both stay the caller's. Tracks are
+ * given in output order, as parallel arrays: stream id, DR_TRACK_ flags, language (ISO 639-2/B)
+ * and name, the last two possibly null.
  */
 JNIEXPORT jbyteArray JNICALL
 Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint title, jint angle,
@@ -438,7 +512,8 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
                                   jobjectArray audio_names, jintArray subtitle_ids, jintArray subtitle_flags,
                                   jobjectArray subtitle_languages, jobjectArray subtitle_names, jboolean lpcm_to_flac,
                                   jbyteArray movie_title, jbyteArray release_date, jobjectArray tag_keys,
-                                  jobjectArray tag_values, jobjectArray chapter_names, jint output_fd, jobject listener) {
+                                  jobjectArray tag_values, jobjectArray chapter_names, jint output_fd,
+                                  jobject output_file, jobject listener) {
     (void) clazz;
     session *s = session_of(handle);
     atomic_store(&s->cancel, 0);
@@ -447,6 +522,8 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
     jmethodID on_progress_id = (*env)->GetMethodID(env, listener_type, "onProgress", "(JJJJ)V");
     (*env)->DeleteLocalRef(env, listener_type);
     if (on_progress_id == NULL) return NULL; /* NoSuchMethodError pending */
+    java_file output = {0};
+    if (output_file != NULL && !java_file_init(env, output_file, &output)) return NULL;
 
     track_arrays audio_in = {0};
     track_arrays subtitles_in = {0};
@@ -496,13 +573,14 @@ Java_be_discrip_rip_NativeRip_rip(JNIEnv *env, jclass clazz, jlong handle, jint 
             .tag_count = key_count,
             .chapter_names = (const char *const *) chapters,
             .chapter_name_count = chapter_count,
-            .output_fd = output_fd,
+            .output = output_file != NULL ? java_file_as_file(&output) : dr_fd_as_file(output_fd),
         };
         rip_call call = {env, listener, on_progress_id, s};
         dr_rip_hooks hooks = {&call, on_progress, is_cancelled};
         report = dr_rip(dr_dvd_reader(s->dvd), &options, &hooks, &logger);
     }
 
+    if (output_file != NULL) java_file_release(&output);
     release_tracks(env, audio_ids, audio_flags, &audio_in);
     release_tracks(env, subtitle_ids, subtitle_flags, &subtitles_in);
     free_texts(chapters, chapter_count);
@@ -535,9 +613,18 @@ Java_be_discrip_rip_NativeRip_close(JNIEnv *env, jclass clazz, jlong handle) {
     release_slot();
 }
 
-/* Describes a finished Matroska file on fd (which stays the caller's). */
+/* Describes a finished Matroska file: file when given, else the one on fd; both stay the caller's. */
 JNIEXPORT jbyteArray JNICALL
-Java_be_discrip_rip_NativeRip_probe(JNIEnv *env, jclass clazz, jint fd) {
+Java_be_discrip_rip_NativeRip_probe(JNIEnv *env, jclass clazz, jint fd, jobject file) {
     (void) clazz;
-    return take_json(env, dr_probe(fd));
+    if (file == NULL) {
+        dr_file input = dr_fd_as_file(fd);
+        return take_json(env, dr_probe(&input));
+    }
+    java_file reader;
+    if (!java_file_init(env, file, &reader)) return NULL;
+    dr_file input = java_file_as_file(&reader);
+    char *json = dr_probe(&input);
+    java_file_release(&reader);
+    return take_json(env, json);
 }

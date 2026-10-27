@@ -24,8 +24,15 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
-      - name: Test platform-independent core
-        run: ./gradlew -p core test
+      # The NAS client's tests talk to a real Samba server on this machine.
+      - name: Start a Samba server for the NAS tests
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends samba
+          scripts/samba-test-server.sh start /tmp/discrip-samba >> "$GITHUB_ENV"
+      - name: Test platform-independent core, the NAS client against Samba
+        run: ./gradlew -p core test smbTest
       - name: Upload core test report
         if: failure()
         uses: actions/upload-artifact@v7
@@ -132,6 +139,14 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Build the app and its instrumented tests
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+      # The emulator wants 1.2 times its data partition free: 7.4 GB for the default 6 GB, about
+      # what the runner has left after the native build. -partition-size makes it 2 GB (the
+      # action's disk-size input did not take effect), and toolchains this job never uses go.
+      - name: Free disk space for the emulator
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          df -h /
       # The app is arm64-v8a only; x86_64 Google APIs images from API 30 on translate ARM code.
       - name: Run instrumented tests
         uses: reactivecircus/android-emulator-runner@v2
@@ -139,10 +154,11 @@ jobs:
           api-level: 30
           target: google_apis
           arch: x86_64
-          # The default userdata partition (7.2 GB) no longer fits next to the native build.
-          disk-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -partition-size 2048
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest
+          script: |
+            adb shell df -h /data
+            ./gradlew :app:connectedDebugAndroidTest
       - name: Instrumented test results
         if: always()
         run: python3 scripts/test_summary.py app/build/outputs/androidTest-results/connected

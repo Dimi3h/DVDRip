@@ -95,6 +95,7 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
                 tagValues = request.tags.values.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 chapterNames = request.chapterNames.map { it.encodeToByteArray() }.toTypedArray<ByteArray?>(),
                 outputFd = output.fd,
+                output = null,
                 listener = listener,
             )
             RipOutcome.parse(report.decodeToString())
@@ -153,6 +154,6 @@ class DvdSession private constructor(private val handle: Long) : Closeable {
         }
 
         /** Reads a finished Matroska file back; [file] stays the caller's. */
-        fun probe(file: ParcelFileDescriptor): Result<MkvSummary> = MkvSummary.parse(NativeRip.probe(file.fd).decodeToString())
+        fun probe(file: ParcelFileDescriptor): Result<MkvSummary> = MkvSummary.parse(NativeRip.probe(file.fd, null).decodeToString())
     }
 }
