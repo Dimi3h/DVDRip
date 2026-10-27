@@ -42,6 +42,9 @@ int dr_plan_build(dvd_reader_t *dvd, ifo_handle_t *vmg, int title, int angle, dr
 
 void dr_plan_free(dr_plan *plan);
 
+/* The picture size the IFO gives a title set: 720, 704 or 352 wide, PAL or NTSC high. */
+void dr_picture_size(const video_attr_t *video, int *width, int *height);
+
 /* 90 kHz ticks of a BCD dvd_time_t; frame rate from its two high bits. */
 int64_t dr_dvd_time_ticks(const dvd_time_t *time);
 

@@ -114,7 +114,11 @@ class LossyEndToEndTest {
         }
     }
 
-    /** Where AGP collects files after the run (build/outputs/connected_android_test_additional_output). */
+    /**
+     * Where AGP collects files after the run (build/outputs/connected_android_test_additional_output):
+     * the folder it names, else the one it looks in by default, in the app's media folder.
+     */
+    @Suppress("DEPRECATION") // externalMediaDirs: AGP still reads that folder.
     private fun additionalOutput(): File {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val given = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")

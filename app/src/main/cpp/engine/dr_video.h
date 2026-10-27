@@ -1,8 +1,10 @@
 /*
  * The video of the lossy presets: MPEG-2 decoded in software, deinterlaced with yadif only where
  * frames are flagged interlaced, given the sample aspect ratio that shows the picture at the
- * DVD's aspect, and encoded at its own size and frame rate by the encoder the app chose
- * (hevc_mediacodec or h264_mediacodec; a software encoder in the host tests).
+ * DVD's aspect, and encoded at the title's size and frame rate by the encoder the app chose
+ * (hevc_mediacodec or h264_mediacodec; a software encoder in the host tests). The size is that of
+ * the first frames, or the IFO's when that is clearly larger, so a title that opens with a part
+ * at half resolution is not made smaller; frames of another size are scaled to it.
  */
 #ifndef DR_VIDEO_H
 #define DR_VIDEO_H
@@ -24,6 +26,9 @@ typedef struct dr_video_config {
     const char *bitrate_mode;
     /* Display aspect ratio from the IFO (4:3 or 16:9); 0/0 to keep the stream's own. */
     AVRational display_aspect;
+    /* The picture size the IFO gives the title set; 0 when unknown. */
+    int title_width;
+    int title_height;
 } dr_video_config;
 
 typedef struct dr_video dr_video;

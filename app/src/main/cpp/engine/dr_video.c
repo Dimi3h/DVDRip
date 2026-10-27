@@ -124,10 +124,12 @@ static int open_encoder(dr_video *video, const AVStream *in, const dr_video_conf
         encoder->height = video->height;
         encoder->pix_fmt = formats[i];
         encoder->sample_aspect_ratio = video->sar;
-        /* One tick per frame, as ffmpeg sets it: FFmpeg's own encoders, the host tests' MPEG-4
-           among them, count frames in it to spread the bit rate. Timing that varies, such as
-           soft-telecined film, is rounded to the nearest frame. */
-        encoder->time_base = av_inv_q(rate);
+        /* MediaCodec takes microseconds and keeps its own rate control: it gets the disc's 90 kHz
+           clock, so every frame keeps its time, also where the frame rate changes within a title
+           (film and video mixed, as on NTSC discs). FFmpeg's own encoders, the host tests' MPEG-4
+           among them, count frames in the time base to spread the bit rate: they get one tick per
+           frame, as ffmpeg gives them. */
+        encoder->time_base = codec->wrapper_name != NULL ? in->time_base : av_inv_q(rate);
         encoder->framerate = rate;
         encoder->bit_rate = config->bit_rate;
         encoder->gop_size = (int) (av_q2d(rate) * KEY_FRAME_SECONDS + 0.5);
@@ -195,6 +197,16 @@ int dr_video_open(dr_video **out, const AVStream *in, const dr_video_config *con
     video->height = in->codecpar->height;
     video->input_time_base = in->time_base;
     video->last_pts = AV_NOPTS_VALUE;
+    /* A title can open with a part at half resolution (a logo, say) before the film: the IFO
+       then tells the size of the rest. A small difference (704 against 720) is left alone. */
+    int64_t found = (int64_t) video->width * video->height;
+    int64_t declared = (int64_t) config->title_width * config->title_height;
+    if (declared * 10 > found * 11) {
+        dr_logf(&video->logger, DR_LOG_INFO, "The title starts at %dx%d; encoding at the %dx%d of its IFO", video->width,
+                video->height, config->title_width, config->title_height);
+        video->width = config->title_width;
+        video->height = config->title_height;
+    }
     if (video->width <= 0 || video->height <= 0) {
         dr_set_error(error, error_size, "The video's size is unknown");
         free(video);
@@ -289,7 +301,7 @@ static int drain_filters(dr_video *video, dr_video_emit emit, void *opaque) {
         if (result < 0) return result;
         AVFrame *frame = video->filtered;
         frame->pts = av_rescale_q(frame->pts, av_buffersink_get_time_base(video->sink), video->encoder->time_base);
-        /* Rounding to frame ticks must not put two frames at one time. */
+        /* Rounding to the encoder's ticks must not put two frames at one time. */
         if (video->last_pts != AV_NOPTS_VALUE && frame->pts <= video->last_pts) frame->pts = video->last_pts + 1;
         video->last_pts = frame->pts;
         /* The source's I-frames are no reason for key frames here. */

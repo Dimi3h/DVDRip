@@ -101,6 +101,31 @@ def codec_private(path, stream):
     return bytes.fromhex(hex_digits).decode("ascii")
 
 
+def author_mixed_sizes(directory):
+    """
+    A one-title image that opens with 2 s at half resolution (352x576, a logo, say) before 4 s at
+    720x576, as some discs do. dvdauthor warns and keeps the IFO at the full size.
+    """
+    environment = dict(os.environ, VIDEO_FORMAT="PAL")
+    parts = []
+    for name, size, seconds in (("half", "352x576", 2), ("full", "720x576", 4)):
+        part = os.path.join(directory, f"{name}.mpg")
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"testsrc2=size={size}:rate=25:duration={seconds}",
+                        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000:duration={seconds}",
+                        "-map", "0:v", "-map", "1:a", "-target", "pal-dvd", "-aspect", "16:9", "-s", size,
+                        "-b:v", "1500k", "-c:a", "ac3", "-b:a", "192k", "-ac", "2", part], check=True)
+        parts.append(f'<vob file="{part}" />')
+    xml = os.path.join(directory, "dvd.xml")
+    with open(xml, "w") as out:
+        out.write(f"""<dvdauthor dest="{directory}/dvd"><vmgm /><titleset><titles>
+            <video format="pal" aspect="16:9" widescreen="nopanscan" /><audio lang="en" format="ac3" />
+            <pgc>{"".join(parts)}</pgc></titles></titleset></dvdauthor>""")
+    subprocess.run(["dvdauthor", "-x", xml], capture_output=True, check=True, env=environment)
+    image = os.path.join(directory, "mixed.iso")
+    subprocess.run(["genisoimage", "-quiet", "-dvd-video", "-udf", "-V", "MIXED", "-o", image, f"{directory}/dvd"], check=True)
+    return image
+
+
 def tone(path, track, start):
     """Dominant frequency (zero crossings) of 0.3 s of an audio track from start seconds on."""
     raw = subprocess.run(
@@ -454,6 +479,18 @@ class EngineTest(unittest.TestCase):
         report = host("rip", ISO, "1", self.output("broken.mkv"), "--audio", "0x80", "--encoder", "mpeg4",
                       "--fail-write-at", halfway, check=False)
         self.assertEqual("write_failed", report["error"])
+
+    def test_a_title_that_opens_smaller_is_encoded_at_its_full_size(self):
+        image = author_mixed_sizes(self.directory.name)
+        self.assertEqual(720, host("titles", image)["titles"][0]["video"]["width"])
+        path = self.output("mixed.mkv")
+        report, log = run_host("rip", image, "1", path, "--audio", "0x80", "--encoder", "mpeg4")
+        self.assertTrue(report["ok"])
+        self.assertIn("encoding at the 720x576 of its IFO", log)
+        # 150 frames coded; FFmpeg's MPEG-2 decoder gives up the one it holds when the size changes.
+        self.assertIn(report["framesEncoded"], (149, 150))
+        video = probe(path, "stream=width,height,sample_aspect_ratio,display_aspect_ratio")["streams"][0]
+        self.assertEqual({"width": 720, "height": 576, "sample_aspect_ratio": "64:45", "display_aspect_ratio": "16:9"}, video)
 
     def test_a_lossy_rip_can_be_cancelled(self):
         report = host("rip", ISO, "1", self.output("cancel.mkv"), "--audio", "0x80", "--encoder", "mpeg4",

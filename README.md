@@ -550,9 +550,11 @@ These were made without asking because they do not change the architecture; each
 41. **The lossy video path** (`engine/dr_video.c`). FFmpeg decodes the MPEG-2 video in software
     (slice threads). A filter graph, built for the frames as they come and rebuilt when their size,
     format or colours change, runs `yadif=mode=send_frame:parity=auto:deint=interlaced` (only
-    frames flagged interlaced, one frame out per frame in), `scale` to the title's size (nothing
-    for frames of that size; titles that change size halfway are rare), `setsar` and `format`
-    (NV12, else planar 4:2:0, whichever the encoder starts with). The pixel aspect follows from the
+    frames flagged interlaced, one frame out per frame in), `scale` to the title's size, `setsar`
+    and `format` (NV12, else planar 4:2:0, whichever the encoder starts with). The title's size is
+    that of its first frames, or the IFO's when that is clearly larger, so a title that opens with
+    a part at half resolution (a logo, say) is not encoded small; frames of another size are scaled
+    to it, the rest pass `scale` untouched. The pixel aspect follows from the
     IFO's display aspect and the full frame, as FFmpeg's MPEG-2 decoder and the lossless copy have
     it: 64:45 for 720×576 at 16:9, 16:15 at 4:3, 32:27 and 8:9 for NTSC. Frame times stay as on the
     disc, so soft-telecined film keeps its 24 frames a second.
@@ -562,9 +564,12 @@ These were made without asking because they do not change the architecture; each
     bitstream filters therefore write it into the parameter sets, in the CodecPrivate and in the
     stream; Matroska's display size carries it too. CI takes the emulator's stream out of Matroska
     and checks it with ffprobe.
-43. **One encoder tick per frame**, as ffmpeg sets it. FFmpeg's own encoders (the MPEG-4 stand-in
-    on the build machine) count frames in the time base to spread the bit rate; in milliseconds they
-    missed the target completely. MediaCodec only converts it to microseconds.
+43. **Encoder time base.** MediaCodec gets the disc's 90 kHz clock (it converts to microseconds and
+    keeps its own rate control), so every frame keeps its exact time, also where the frame rate
+    changes within a title, as with film and video mixed on NTSC discs; rounded to ticks of one
+    frame, such frames would collide and drift away from the sound. FFmpeg's own encoders (the
+    MPEG-4 stand-in on the build machine) count frames in the time base to spread the bit rate, so
+    they get one tick per frame, as ffmpeg gives them; in milliseconds they missed the target.
 44. **Which encoder.** From MediaCodecList (regular codecs, no aliases): encoders that take the
     title's size from buffers (NV12, planar or flexible 4:2:0). For the HEVC presets: hardware HEVC,
     then hardware H.264, then software HEVC, then software H.264; for "Breed compatibel" hardware,

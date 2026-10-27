@@ -902,13 +902,18 @@ char *dr_rip(dr_dvd *dvd, const dr_rip_options *options, const dr_rip_hooks *hoo
 
     if (options->video_encoder != NULL && options->video_encoder[0]) {
         /* The IFO's display aspect is the one the disc means: 0 is 4:3, 3 is 16:9. */
-        int aspect = r->plan.vts->vtsi_mat->vts_video_attr.display_aspect_ratio;
+        const video_attr_t *attr = &r->plan.vts->vtsi_mat->vts_video_attr;
+        int aspect = attr->display_aspect_ratio;
+        int title_width, title_height;
+        dr_picture_size(attr, &title_width, &title_height);
         dr_video_config config = {
             .encoder = options->video_encoder,
             .component = options->video_component,
             .bit_rate = options->video_bit_rate,
             .bitrate_mode = options->video_bitrate_mode,
             .display_aspect = aspect == 3 ? (AVRational) {16, 9} : aspect == 0 ? (AVRational) {4, 3} : (AVRational) {0, 0},
+            .title_width = title_width,
+            .title_height = title_height,
         };
         result = dr_video_open(&r->video, r->in->streams[r->video_in], &config, 1, &r->logger, error, sizeof(error));
         if (result < 0) {

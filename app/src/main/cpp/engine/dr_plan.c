@@ -225,13 +225,20 @@ static const char *subtitle_extension(int code) {
     }
 }
 
+void dr_picture_size(const video_attr_t *video, int *width, int *height) {
+    static const int widths[4] = {720, 704, 352, 352};
+    int pal = video->video_format == 1;
+    *width = widths[video->picture_size & 3];
+    *height = (video->picture_size & 3) == 3 ? (pal ? 288 : 240) : (pal ? 576 : 480);
+}
+
 static void title_json(dr_json *json, const dr_plan *plan, const title_info_t *info) {
     const vtsi_mat_t *mat = plan->vts->vtsi_mat;
     const video_attr_t *video = &mat->vts_video_attr;
     const pgc_t *pgc = plan->pgc;
     int pal = video->video_format == 1;
-    int heights[4] = {pal ? 576 : 480, pal ? 576 : 480, pal ? 576 : 480, pal ? 288 : 240};
-    int widths[4] = {720, 704, 352, 352};
+    int width, height;
+    dr_picture_size(video, &width, &height);
 
     dr_json_begin_object(json);
     dr_json_key(json, "number"); dr_json_int(json, plan->title);
@@ -247,8 +254,8 @@ static void title_json(dr_json *json, const dr_plan *plan, const title_info_t *i
     dr_json_key(json, "mpegVersion"); dr_json_int(json, video->mpeg_version == 0 ? 1 : 2);
     dr_json_key(json, "standard"); dr_json_string(json, pal ? "PAL" : "NTSC");
     dr_json_key(json, "aspect"); dr_json_string(json, video->display_aspect_ratio == 3 ? "16:9" : "4:3");
-    dr_json_key(json, "width"); dr_json_int(json, widths[video->picture_size & 3]);
-    dr_json_key(json, "height"); dr_json_int(json, heights[video->picture_size & 3]);
+    dr_json_key(json, "width"); dr_json_int(json, width);
+    dr_json_key(json, "height"); dr_json_int(json, height);
     dr_json_key(json, "letterboxed"); dr_json_bool(json, video->letterboxed);
     dr_json_key(json, "film"); dr_json_bool(json, video->film_mode);
     dr_json_end_object(json);

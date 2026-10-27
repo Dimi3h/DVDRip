@@ -234,10 +234,16 @@ private fun RunningContent(rip: RipState.Running) {
                     valueColor = if (slower) colors.orange else colors.secondaryLabel,
                 )
             }
-        } else {
-            row { ValueRow(stringResource(R.string.rip_speed), progress?.readBytesPerSecond?.let { Formats.speed(it, locale) } ?: measuring) }
         }
-        row { ValueRow(stringResource(R.string.rip_remaining), progress?.remainingMs?.let { Formats.duration(it / 1000) } ?: measuring) }
+        row { ValueRow(stringResource(R.string.rip_speed), progress?.readBytesPerSecond?.let { Formats.speed(it, locale) } ?: measuring) }
+        row {
+            // Slower than the film plays: the footer below says so.
+            ValueRow(
+                stringResource(R.string.rip_remaining),
+                progress?.remainingMs?.let { Formats.duration(it / 1000) } ?: measuring,
+                valueColor = if (slower) colors.orange else colors.secondaryLabel,
+            )
+        }
         row { ValueRow(stringResource(R.string.rip_written), Formats.bytes(progress?.outputBytes ?: 0, locale)) }
         row {
             ValueRow(
