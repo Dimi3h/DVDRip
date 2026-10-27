@@ -323,8 +323,9 @@ class RipManager(
         ripState.value = RipState.Running(job, progress = null, stage = if (job.destination.nas != null) RipStage.PREPARING else RipStage.RIPPING)
         scope.launch(engine) {
             val (state, pending) = runRip(job, cancelled)
-            ripState.value = state
+            // In the history before anyone sees the rip end.
             record(job, state, pending)
+            ripState.value = state
         }
         return true
     }
