@@ -93,6 +93,7 @@ final class AppModel {
 
     // Batch flow
     var nextDiscPrompt = false
+    private var ejectedAfterRip = false
     var banner: String?
 
     let encoders = NativeDisc.hardwareEncoders
@@ -122,8 +123,9 @@ final class AppModel {
         let previous = Set(discs.map(\.bsdName))
         drives = monitor.drives
         discs = monitor.media
-        // The disc being shown was ejected or the drive was unplugged.
-        if let m = source?.media, !discs.contains(where: { $0.bsdName == m.bsdName }), !isRipping {
+        // The disc being shown was ejected or the drive was unplugged. While a rip result is on
+        // screen (the disc was just ejected by DiscRip) the result stays until "Klaar".
+        if let m = source?.media, !discs.contains(where: { $0.bsdName == m.bsdName }), !isRipping, rip == nil {
             closeDisc()
             banner = String(localized: "De disc werd verwijderd.")
         }
@@ -420,26 +422,43 @@ final class AppModel {
 
         if result != nil {
             Haptics.success()
+            if settings.playSounds { Sounds.success.play() }
             notify(title: String(localized: "Rip klaar"), body: plan.metadata.title)
             if settings.ejectAfterRip, let m = source?.media {
+                // The raw device must be closed before macOS will eject it.
+                disc = nil
                 Task {
-                    _ = await monitor.eject(m)
-                    self.nextDiscPrompt = true
+                    let ok = await monitor.eject(m)
+                    if ok {
+                        self.ejectedAfterRip = true
+                    } else {
+                        self.banner = String(localized: "De disc kon niet automatisch uitgeworpen worden. Gebruik Disc › Disc uitwerpen.")
+                    }
                 }
             }
         } else if error != .cancelled {
+            if settings.playSounds { Sounds.failure.play() }
             notify(title: String(localized: "Rip mislukt"), body: error?.localizedDescription ?? "")
         }
     }
 
     /// After a finished rip: back to the start, ready for the next disc.
     func doneWithRip() {
+        let succeeded = rip?.result != nil
+        let wasDrive = source?.media != nil
         rip = nil
-        if source?.media != nil && settings.ejectAfterRip {
+        if wasDrive && (ejectedAfterRip || succeeded) {
             closeDisc()
-            nextDiscPrompt = true
-        } else {
+            ejectedAfterRip = false
+            if let dvd = dvdInDrive {
+                openDrive(dvd) // a new disc was inserted while the result was on screen
+            } else {
+                nextDiscPrompt = true
+            }
+        } else if source != nil {
             path = [.disc]
+        } else {
+            path = []
         }
     }
 
@@ -460,6 +479,16 @@ final class AppModel {
     func clearHistory() {
         history = []
         historyStore.save([])
+    }
+}
+
+enum Sounds {
+    case success, failure
+
+    func play() {
+        // System sounds; Glass for a finished rip, Basso for a failed one.
+        let name = self == .success ? "Glass" : "Basso"
+        NSSound(named: NSSound.Name(name))?.play()
     }
 }
 

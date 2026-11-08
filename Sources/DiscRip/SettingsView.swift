@@ -47,6 +47,7 @@ private struct GeneralSettings: View {
             }
             Section("Na het rippen") {
                 Toggle("Disc uitwerpen en wachten op de volgende", isOn: $model.settings.ejectAfterRip)
+                Toggle("Geluid afspelen als de rip klaar is of mislukt", isOn: $model.settings.playSounds)
             }
         }
         .formStyle(.grouped)

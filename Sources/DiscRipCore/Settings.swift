@@ -83,6 +83,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     // Behaviour
     public var ejectAfterRip: Bool = true
+    public var playSounds: Bool = true
 
     public init() {}
 
@@ -135,6 +136,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         plexMoviesSectionId = v(.plexMoviesSectionId, plexMoviesSectionId)
         plexHomeVideosSectionId = v(.plexHomeVideosSectionId, plexHomeVideosSectionId)
         ejectAfterRip = v(.ejectAfterRip, ejectAfterRip)
+        playSounds = v(.playSounds, playSounds)
     }
 }
 

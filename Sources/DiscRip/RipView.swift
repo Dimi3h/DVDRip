@@ -226,8 +226,11 @@ private struct SuccessSection: View {
         }
         if model.source?.media != nil && model.settings.ejectAfterRip {
             Section {
-                Label("De disc wordt uitgeworpen. Steek de volgende disc in om meteen verder te gaan.", systemImage: "eject")
+                Label("De disc is uitgeworpen. Steek de volgende disc in en klik op Klaar om verder te gaan.", systemImage: "eject")
                     .foregroundStyle(.secondary)
+                if let banner = model.banner {
+                    Label(banner, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                }
             }
         }
     }

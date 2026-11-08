@@ -137,7 +137,9 @@
 "Beide" = "Both";
 "Toon in Finder" = "Show in Finder";
 "Let op" = "Note";
-"De disc wordt uitgeworpen. Steek de volgende disc in om meteen verder te gaan." = "The disc is being ejected. Insert the next disc to continue right away.";
+"De disc is uitgeworpen. Steek de volgende disc in en klik op Klaar om verder te gaan." = "The disc was ejected. Insert the next disc and click Done to continue.";
+"De disc kon niet automatisch uitgeworpen worden. Gebruik Disc › Disc uitwerpen." = "The disc could not be ejected automatically. Use Disc › Eject Disc.";
+"Geluid afspelen als de rip klaar is of mislukt" = "Play a sound when the rip finishes or fails";
 "Rip geannuleerd" = "Rip cancelled";
 "Het onvolledige bestand werd verwijderd." = "The incomplete file was deleted.";
 "Logbestanden tonen" = "Show Log Files";
