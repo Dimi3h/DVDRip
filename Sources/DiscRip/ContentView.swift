@@ -69,7 +69,7 @@ private struct SidebarDiscRow: View {
 
     private var subtitle: String {
         if model.isRipping { return model.rip?.phase.label ?? "" }
-        if let s = model.source { return s.displayName }
+        if model.source != nil, let title = model.sourceTitle { return title }
         if model.primaryDrive == nil { return String(localized: "Geen drive") }
         return String(localized: "Geen disc")
     }

@@ -9,7 +9,7 @@ struct DiscView: View {
         @Bindable var model = model
         Form {
             Section {
-                PageHeader(verbatim: model.source?.displayName ?? String(localized: "Disc"),
+                PageHeader(verbatim: model.sourceTitle ?? String(localized: "Disc"),
                            subtitle: model.info.map { String(localized: "\($0.titles.count) titels op de disc") })
             }
             .listRowBackground(Color.clear)
@@ -95,7 +95,7 @@ struct DiscView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(model.source?.displayName ?? String(localized: "Disc"))
+        .navigationTitle(model.sourceTitle ?? String(localized: "Disc"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

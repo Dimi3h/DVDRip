@@ -21,7 +21,20 @@
 "Rip mislukt" = "Rip failed";
 
 /* Home */
-"DVD-Video naar MKV, klaar voor Plex." = "DVD-Video to MKV, ready for Plex.";
+"Geen drive aangesloten" = "No drive connected";
+"Steek een dvd in" = "Insert a DVD";
+"DiscRip opent de disc vanzelf zodra hij in de drive zit." = "DiscRip opens the disc as soon as it is in the drive.";
+"De vorige rip is klaar. De volgende disc opent vanzelf." = "The previous rip is done. The next disc opens automatically.";
+"Titels en CSS-sleutels worden ingelezen. Bij sommige discs duurt dat een minuut." = "Reading titles and CSS keys. On some discs this takes a minute.";
+"Hoofdfilm %@ · %lld audio · %lld titels op de disc" = "Main feature %1$@ · %2$lld audio · %3$lld titles on the disc";
+"De disc kon niet gelezen worden." = "The disc could not be read.";
+"Klaar om te openen" = "Ready to open";
+"Deze disc kan niet geript worden" = "This disc cannot be ripped";
+"Verder naar rippen" = "Continue to Rip";
+"Disc openen" = "Open Disc";
+"Optische drive" = "Optical drive";
+"Laatst geript" = "Recently ripped";
+"Alles tonen" = "Show All";
 "Steek de volgende disc in" = "Insert the next disc";
 "De vorige rip is klaar en de disc werd uitgeworpen. DiscRip opent de volgende disc vanzelf." = "The previous rip is done and the disc was ejected. DiscRip opens the next disc automatically.";
 "Drive" = "Drive";

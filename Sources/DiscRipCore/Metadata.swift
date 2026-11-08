@@ -42,6 +42,10 @@ public struct MediaMetadata: Codable, Equatable, Sendable {
         self.originalTitle = originalTitle
     }
 
+    public var posterURL: URL? {
+        posterPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w342\($0)") }
+    }
+
     public var isValid: Bool {
         !title.trimmingCharacters(in: .whitespaces).isEmpty && (year.map { (1888...2100).contains($0) } ?? true)
     }

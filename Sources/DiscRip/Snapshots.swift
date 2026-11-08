@@ -15,12 +15,21 @@ enum Snapshots {
 
     static func run(model: AppModel, folder: URL, iso: URL?) async {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Start screen before anything is opened.
+        model.closeDisc()
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            render(AnyView(NavigationStack { HomeView() }).environment(model), size: CGSize(width: 760, height: 900),
+                   appearance: appearance,
+                   to: folder.appendingPathComponent("home-start\(appearance == .darkAqua ? "-dark" : "").png"),
+                   wait: 3)
+        }
         if let iso {
             model.openFile(iso)
             for _ in 0..<100 where model.info == nil { try? await Task.sleep(nanoseconds: 100_000_000) }
         }
         let screens: [(String, AnyView, CGSize)] = [
-            ("home", AnyView(NavigationStack { HomeView() }), CGSize(width: 760, height: 640)),
+            ("home", AnyView(NavigationStack { HomeView() }), CGSize(width: 760, height: 900)),
             ("disc", AnyView(NavigationStack { DiscView() }), CGSize(width: 760, height: 1500)),
             ("metadata", AnyView(NavigationStack { MetadataView() }), CGSize(width: 760, height: 900)),
             ("settings", AnyView(SettingsView()), CGSize(width: 560, height: 560)),
@@ -47,7 +56,8 @@ enum Snapshots {
         NSApp.terminate(nil)
     }
 
-    static func render<V: View>(_ view: V, size: CGSize, appearance: NSAppearance.Name, to url: URL) {
+    static func render<V: View>(_ view: V, size: CGSize, appearance: NSAppearance.Name, to url: URL,
+                                wait: TimeInterval = 0.4) {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
@@ -55,7 +65,7 @@ enum Snapshots {
         window.contentView = host
         window.layoutIfNeeded()
         host.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        RunLoop.main.run(until: Date().addingTimeInterval(wait))
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
         host.cacheDisplay(in: host.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)

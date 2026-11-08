@@ -113,6 +113,26 @@ final class AppModel {
         }
     }
 
+    // MARK: Display names
+
+    /// "PLOP_EN_DE_KABOUTERKERMIS" -> "Plop En De Kabouterkermis".
+    static func prettyTitle(volumeLabel: String) -> String {
+        TitleNormalizer.searchTitle(fromVolumeLabel: volumeLabel)
+    }
+
+    /// Readable name of the open source: the disc label for a drive, the file name for an image.
+    var sourceTitle: String? {
+        guard let s = source else { return nil }
+        switch s.kind {
+        case let .drive(m):
+            // The volume name may arrive after the disc itself (mounting); use the latest known one.
+            let current = discs.first { $0.bsdName == m.bsdName }?.volumeName ?? m.volumeName
+            guard let label = info?.volumeLabel.nonEmpty ?? current else { return nil }
+            return Self.prettyTitle(volumeLabel: label)
+        case let .file(url): return Self.prettyTitle(volumeLabel: info?.volumeLabel.nonEmpty ?? url.deletingPathExtension().lastPathComponent)
+        }
+    }
+
     // MARK: Hardware
 
     var primaryDrive: OpticalDrive? { drives.first }
@@ -435,6 +455,8 @@ final class AppModel {
         history = historyStore.append(entry)
 
         if result != nil {
+            let meta = plan.metadata
+            Task { _ = await PosterCache.load(for: meta) }
             Haptics.success()
             if settings.playSounds { Sounds.success.play() }
             notify(title: String(localized: "Rip klaar"), body: plan.metadata.title)
