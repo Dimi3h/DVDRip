@@ -48,7 +48,7 @@ public enum SubtitleDefault: String, Codable, CaseIterable, Identifiable, Sendab
 
 public struct AppSettings: Codable, Equatable, Sendable {
     // Quality
-    public var defaultPreset: QualityPreset = .lossless
+    public var defaultPreset: QualityPreset = .balanced
     public var balancedKbps: Int = QualityPreset.balanced.defaultBitrateKbps
     public var compactKbps: Int = QualityPreset.compact.defaultBitrateKbps
     public var compatibleKbps: Int = QualityPreset.compatible.defaultBitrateKbps

@@ -155,7 +155,7 @@ private func title(_ i: Int, minutes: Double, chapters: Int = 10, audio: Int = 2
         for p in QualityPreset.allCases where p.isLossy {
             #expect(p.label.contains("met kwaliteitsverlies"))
         }
-        #expect(AppSettings().defaultPreset == .lossless)
+        #expect(AppSettings().defaultPreset == .balanced)
         #expect(QualityPreset.balanced.defaultBitrateKbps == 2500)
         #expect(QualityPreset.compact.defaultBitrateKbps == 1200)
         #expect(QualityPreset.compatible.videoCodec == .h264)

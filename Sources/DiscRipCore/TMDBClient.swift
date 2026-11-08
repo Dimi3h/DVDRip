@@ -132,6 +132,22 @@ public struct TMDBClient: Sendable {
         return r.movie_results.first
     }
 
+    /// The result to preselect: an exact title match (ignoring case, accents and punctuation),
+    /// preferring the requested year; otherwise TMDB's most relevant result (the first).
+    public static func bestMatch(_ movies: [Movie], query: String, year: Int? = nil) -> Movie? {
+        func norm(_ s: String) -> String {
+            s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                .unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+                .map(String.init).joined()
+        }
+        let q = norm(query)
+        let exact = movies.filter { norm($0.title) == q || norm($0.originalTitle ?? "") == q }
+        if let year, let hit = exact.first(where: { $0.year == year }) ?? movies.prefix(3).first(where: { $0.year == year }) {
+            return hit
+        }
+        return exact.first ?? movies.first
+    }
+
     /// Checks the credential.
     public func validate() async throws {
         struct Config: Codable { var images: [String: AnyCodableIgnored]? }

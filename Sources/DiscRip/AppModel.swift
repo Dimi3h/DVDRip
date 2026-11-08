@@ -328,6 +328,7 @@ final class AppModel {
                 let results = try await TMDBClient(credential: key).search(query, year: year)
                 self.searchResults = results
                 if results.isEmpty { self.searchError = String(localized: "Geen resultaten op TMDB voor “\(query)”.") }
+                if let best = TMDBClient.bestMatch(results, query: query, year: year) { self.choose(best) }
             } catch {
                 self.searchResults = []
                 self.searchError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

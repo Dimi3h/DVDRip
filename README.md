@@ -54,7 +54,7 @@ scripts/build-app.sh                  # → dist/DiscRip.app (ad-hoc ondertekend
 open dist/DiscRip.app
 ```
 
-Tests (40, waaronder end-to-end-rips van de test-ISO, lossless en Gebalanceerd):
+Tests (47, waaronder end-to-end-rips van de test-ISO, lossless en Gebalanceerd):
 
 ```bash
 swift run --build-system native DiscRipTestRunner

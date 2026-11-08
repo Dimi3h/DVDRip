@@ -73,6 +73,20 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         #expect(StubProtocol.requests(host).first?.value(forHTTPHeaderField: "Authorization") == "Bearer eyJhbGciOi.token")
     }
 
+    @Test func bestMatchPrefersExactTitleThenYearThenFirst() {
+        let m = [TMDBClient.Movie(id: 1, title: "Plop Special: De Kabouterkermis", releaseDate: "2013-01-01"),
+                 TMDBClient.Movie(id: 2, title: "Plop en de Kabouterkermis", releaseDate: "2005-06-01"),
+                 TMDBClient.Movie(id: 3, title: "Plop en de Kabouterkermis", releaseDate: "2009-06-01")]
+        #expect(TMDBClient.bestMatch(m, query: "Plop En De Kabouterkermis")?.id == 2)
+        #expect(TMDBClient.bestMatch(m, query: "plop en de kabouterkermis", year: 2009)?.id == 3)
+        #expect(TMDBClient.bestMatch(m, query: "Kabouterkermis")?.id == 1)
+        #expect(TMDBClient.bestMatch(m, query: "Kabouterkermis", year: 2013)?.id == 1)
+        let accents = [TMDBClient.Movie(id: 9, title: "Amélie et la Métaphysique des Tubes"),
+                       TMDBClient.Movie(id: 194, title: "Amélie", originalTitle: "Le Fabuleux Destin d'Amélie Poulain")]
+        #expect(TMDBClient.bestMatch(accents, query: "AMELIE")?.id == 194)
+        #expect(TMDBClient.bestMatch([], query: "x") == nil)
+    }
+
     @Test func missingKey() async {
         let client = TMDBClient(credential: " ")
         await #expect(throws: DiscRipError.tmdbNoKey) { try await client.search("x") }
