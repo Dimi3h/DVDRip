@@ -25,6 +25,12 @@
           "streamId" : 161
         }
       ],
+      "cellRanges" : [
+        [
+          0,
+          865
+        ]
+      ],
       "cells" : 1,
       "chapterStartsMs" : [
         0
@@ -101,6 +107,20 @@
           "sampleRate" : 48000,
           "streamId" : 161
         }
+      ],
+      "cellRanges" : [
+        [
+          866,
+          1881
+        ],
+        [
+          1882,
+          2910
+        ],
+        [
+          2911,
+          4557
+        ]
       ],
       "cells" : 3,
       "chapterStartsMs" : [

@@ -28,6 +28,8 @@ public struct TitleInfo: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var cssKeyMissing: Bool
     public var video: VideoInfo
     public var chapterStartsMs: [Int64]
+    /// [firstSector, lastSector] per cell, in playback order.
+    public var cellRanges: [[Int64]]?
     public var audio: [AudioTrack]
     public var subtitles: [SubtitleTrack]
     public var palette: [String]
@@ -38,7 +40,7 @@ public struct TitleInfo: Codable, Sendable, Equatable, Identifiable, Hashable {
 
     public init(index: Int, vts: Int = 1, ttn: Int = 1, angles: Int = 1, chapters: Int, cells: Int = 1,
                 durationMs: Int64, sectors: Int64 = 0, cssKeyMissing: Bool = false,
-                video: VideoInfo = VideoInfo(), chapterStartsMs: [Int64] = [0],
+                video: VideoInfo = VideoInfo(), chapterStartsMs: [Int64] = [0], cellRanges: [[Int64]]? = nil,
                 audio: [AudioTrack] = [], subtitles: [SubtitleTrack] = [], palette: [String] = []) {
         self.index = index
         self.vts = vts
@@ -51,6 +53,7 @@ public struct TitleInfo: Codable, Sendable, Equatable, Identifiable, Hashable {
         self.cssKeyMissing = cssKeyMissing
         self.video = video
         self.chapterStartsMs = chapterStartsMs
+        self.cellRanges = cellRanges
         self.audio = audio
         self.subtitles = subtitles
         self.palette = palette

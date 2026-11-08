@@ -339,6 +339,9 @@ char *dr_disc_info_json(dr_disc *disc) {
             dr_buf_printf(&b, "%s%lld", cf ? "" : ",", (long long)(L.cells[i].start90 / 90));
             cf = 0;
         }
+        dr_buf_printf(&b, "],\"cellRanges\":[");
+        for (int i = 0; i < L.cell_count; i++)
+            dr_buf_printf(&b, "%s[%u,%u]", i ? "," : "", L.cells[i].first_sector, L.cells[i].last_sector);
         dr_buf_printf(&b, "],\"audio\":[");
         int af = 1;
         for (int i = 0; i < m->nr_of_vts_audio_streams && i < 8; i++) {

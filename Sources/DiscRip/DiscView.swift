@@ -35,7 +35,7 @@ struct DiscView: View {
             } header: {
                 Text("Hoofdfilm")
             } footer: {
-                Text("DiscRip koos de langste plausibele titel. Klopt dat, ga dan gewoon verder.")
+                Text("DiscRip koos de langste plausibele titel. Een ‘alles afspelen’-titel van bonusmateriaal verliest van een echt programma; titels met dezelfde inhoud staan onder ‘Alle titels tonen’.")
                     .foregroundStyle(.secondary)
             }
 
@@ -147,7 +147,13 @@ private struct TitleRow: View {
                                    "\(t.video.standard) \(t.video.aspect)"].joined(separator: " · "))
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    if candidate.duplicates >= 2 {
+                    if let d = candidate.duplicateOf {
+                        Text("Zelfde inhoud als titel \(d)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if !candidate.playsAll.isEmpty {
+                        Text("Speelt titels \(TitleScoring.rangeLabel(candidate.playsAll)) na elkaar (\(candidate.playsAll.count) onderdelen)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if candidate.duplicates >= 2 {
                         Text("\(candidate.duplicates) bijna identieke titels: waarschijnlijk geen hoofdfilm")
                             .font(.caption).foregroundStyle(.secondary)
                     }

@@ -52,6 +52,68 @@ private func title(_ i: Int, minutes: Double, chapters: Int = 10, audio: Int = 2
     }
 }
 
+@Suite struct PlayAllAndDuplicateTests {
+    /// Models the "Plop en de Kabouterkermis" disc: a 39 min show (title 5, duplicated as 6) and
+    /// eight 5 min episodes (8...15) with a "play all" title (7, duplicated as 16).
+    static func kermis() -> [TitleInfo] {
+        var titles: [TitleInfo] = []
+        func t(_ i: Int, vts: Int, minutes: Double, chapters: Int, audio: Int, cells: [[Int64]]) -> TitleInfo {
+            TitleInfo(index: i, vts: vts, chapters: chapters, durationMs: Int64(minutes * 60_000), sectors: 1000,
+                      cellRanges: cells, audio: (0..<audio).map { AudioTrack(streamId: 0x80 + $0) })
+        }
+        let show: [[Int64]] = [[0, 500_000], [500_001, 1_100_000]]
+        titles.append(t(5, vts: 5, minutes: 38.8, chapters: 2, audio: 2, cells: show))
+        titles.append(t(6, vts: 5, minutes: 38.8, chapters: 2, audio: 2, cells: show))
+        // Every episode ends with the same short outro cell, as on the real disc.
+        let outro: [Int64] = [1_200_000, 1_200_150]
+        var playAll: [[Int64]] = []
+        for e in 0..<8 {
+            let start = Int64(e) * 150_000
+            let body: [Int64] = [start, start + 149_999]
+            playAll.append(body)
+            titles.append(t(8 + e, vts: 6, minutes: 5.4, chapters: 2, audio: 1, cells: [body, outro]))
+        }
+        playAll.append(outro)
+        titles.append(t(7, vts: 6, minutes: 43.3, chapters: 9, audio: 1, cells: playAll))
+        titles.append(t(16, vts: 6, minutes: 43.3, chapters: 9, audio: 1, cells: playAll))
+        titles.append(t(1, vts: 1, minutes: 0.5, chapters: 2, audio: 1, cells: [[0, 13_000]]))
+        return titles
+    }
+
+    @Test func exactDuplicatesCollapse() {
+        let ranked = TitleScoring.rank(Self.kermis())
+        let t16 = ranked.first { $0.id == 16 }
+        #expect(t16?.duplicateOf == 7)
+        #expect(t16?.plausible == false)
+        #expect(ranked.first { $0.id == 6 }?.duplicateOf == 5)
+        #expect(ranked.first { $0.id == 7 }?.duplicateOf == nil)
+    }
+
+    @Test func playAllIsRecognised() {
+        let ranked = TitleScoring.rank(Self.kermis())
+        #expect(ranked.first { $0.id == 7 }?.playsAll == Array(8...15))
+        #expect(ranked.first { $0.id == 8 }?.playsAll == [])
+        #expect(TitleScoring.rangeLabel([8, 9, 10, 11, 12, 13, 14, 15]) == "8–15")
+        #expect(TitleScoring.rangeLabel([3, 5]) == "3, 5")
+    }
+
+    @Test func realProgrammeBeatsPlayAllOfBonusMaterial() {
+        #expect(TitleScoring.mainFeature(Self.kermis())?.index == 5)
+    }
+
+    @Test func playAllWinsOnAnEpisodesOnlyDisc() {
+        let titles = Self.kermis().filter { ![5, 6].contains($0.index) }
+        #expect(TitleScoring.mainFeature(titles)?.index == 7)
+    }
+
+    @Test func titlesWithoutCellInfoBehaveAsBefore() {
+        let titles = [TitleInfo(index: 1, chapters: 2, durationMs: 120_000), TitleInfo(index: 2, chapters: 12, durationMs: 5_400_000)]
+        let ranked = TitleScoring.rank(titles)
+        #expect(ranked.first?.id == 2)
+        #expect(ranked.allSatisfy { $0.duplicateOf == nil && $0.playsAll.isEmpty })
+    }
+}
+
 @Suite struct SizeEstimatorTests {
     let film: TitleInfo = {
         TitleInfo(index: 1, chapters: 20, durationMs: 2 * 3600 * 1000,
