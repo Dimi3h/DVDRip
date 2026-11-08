@@ -20,7 +20,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/DiscRip"
 
-VERSION="$(git describe --tags --always 2>/dev/null || echo 1.0)"
+# Build number: the number of commits, so every build from a newer commit is higher.
+BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+VERSION="1.0"
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -31,8 +33,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleIdentifier</key><string>be.discrip.DiscRip</string>
   <key>CFBundleExecutable</key><string>DiscRip</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleDevelopmentRegion</key><string>nl</string>
   <key>CFBundleLocalizations</key><array><string>nl</string><string>en</string></array>
@@ -54,5 +56,8 @@ ICONSET="$(mktemp -d)/AppIcon.iconset"
 swift scripts/tools/make_icon.swift "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
-codesign --force --sign - --timestamp=none "$APP"
+# Ad-hoc signature by default. Set SIGN_IDENTITY to the name of a code-signing certificate in your
+# keychain (e.g. a self-signed "DiscRip Local") to keep the same identity across builds, so macOS
+# stops asking again for keychain access after every update.
+codesign --force --sign "${SIGN_IDENTITY:--}" --timestamp=none "$APP"
 echo "==> $APP"

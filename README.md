@@ -54,6 +54,25 @@ scripts/build-app.sh                  # → dist/DiscRip.app (ad-hoc ondertekend
 open dist/DiscRip.app
 ```
 
+### Installeren
+
+```bash
+scripts/install.sh      # bouwt en installeert in /Applications (vervangt een oudere versie)
+scripts/make-dmg.sh     # → dist/DiscRip-<versie>-<build>.dmg om te bewaren of naar een andere Mac te kopiëren
+```
+
+De app is zelfstandig (alle bibliotheken zitten erin, ±9 MB) en draait op elke Apple Silicon-Mac
+met macOS 14 of nieuwer. Hij is ad-hoc ondertekend, niet genotariseerd:
+
+- Op de Mac waarop je hem bouwt, start hij gewoon.
+- Op een andere Mac blokkeert macOS hem de eerste keer. Open hem dan één keer via
+  Systeeminstellingen › Privacy en beveiliging › "Toch openen".
+- Na elke nieuwe build kan macOS opnieuw vragen of DiscRip de sleutelhanger mag gebruiken. Wil je
+  dat vermijden, maak dan in Sleutelhangertoegang een eigen codesigning-certificaat aan (bv.
+  "DiscRip Local") en bouw met `SIGN_IDENTITY="DiscRip Local" scripts/install.sh`.
+- Notariseren (geen enkele waarschuwing, ook niet op andere Macs) vereist een betaald Apple
+  Developer-account; voor persoonlijk gebruik is dat niet nodig.
+
 Tests (47, waaronder end-to-end-rips van de test-ISO, lossless en Gebalanceerd):
 
 ```bash
