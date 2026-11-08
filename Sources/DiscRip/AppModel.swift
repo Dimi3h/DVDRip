@@ -173,19 +173,32 @@ final class AppModel {
         banner = nil
         sidebar = .disc
         let cache = AppPaths.cssCacheDirectory
+        // A drive that has spun down needs a few seconds before reads succeed: retry before
+        // concluding that the disc is not a DVD-Video. Files and folders are tried once.
+        let attempts = src.media != nil ? 3 : 1
         Task {
             let result: Result<(NativeDisc, DiscInfo), DiscRipError> = await Task.detached(priority: .userInitiated) {
                 var lastError: DiscRipError = .notDVDVideo(detail: "")
-                for p in paths {
-                    do {
-                        let d = try NativeDisc(path: p, cssCacheDirectory: cache)
-                        let i = try d.info()
-                        if i.titles.isEmpty { throw DiscRipError.notDVDVideo(detail: "no titles") }
-                        return .success((d, i))
-                    } catch let e as DiscRipError {
-                        lastError = e
-                    } catch {
-                        lastError = .notDVDVideo(detail: error.localizedDescription)
+                for attempt in 1...attempts {
+                    if attempt > 1 {
+                        AppLog.write("Retrying in 4 s (attempt \(attempt) of \(attempts))")
+                        try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    }
+                    for p in paths {
+                        AppLog.write("Opening \(p)")
+                        do {
+                            let d = try NativeDisc(path: p, cssCacheDirectory: cache)
+                            let i = try d.info()
+                            if i.titles.isEmpty { throw DiscRipError.notDVDVideo(detail: "no titles in \(p)") }
+                            AppLog.write("Opened \(p): \(i.volumeLabel), \(i.titles.count) titles")
+                            return .success((d, i))
+                        } catch let e as DiscRipError {
+                            if case let .notDVDVideo(detail) = e { AppLog.write("Failed: \(detail)") }
+                            lastError = e
+                        } catch {
+                            AppLog.write("Failed: \(error)")
+                            lastError = .notDVDVideo(detail: error.localizedDescription)
+                        }
                     }
                 }
                 return .failure(lastError)

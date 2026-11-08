@@ -101,3 +101,26 @@ public enum AppPaths {
         return base.appendingPathComponent("Logs/DiscRip", isDirectory: true)
     }
 }
+
+/// Application log (~/Library/Logs/DiscRip/DiscRip.log): disc events and open errors.
+public enum AppLog {
+    private static let lock = NSLock()
+
+    public static var url: URL { AppPaths.logDirectory.appendingPathComponent("DiscRip.log") }
+
+    public static func write(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: AppPaths.logDirectory, withIntermediateDirectories: true)
+        // Keep the log small: start over above 1 MB.
+        if let size = (try? fm.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue, size > 1_000_000 {
+            try? fm.removeItem(at: url)
+        }
+        if !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
+        guard let h = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? h.close() }
+        _ = try? h.seekToEnd()
+        h.write(Data((ISO8601DateFormatter().string(from: Date()) + " " + message + "\n").utf8))
+    }
+}

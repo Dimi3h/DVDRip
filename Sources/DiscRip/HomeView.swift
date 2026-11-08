@@ -52,6 +52,12 @@ struct HomeView: View {
                 Section {
                     Label(e.localizedDescription, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
+                    if case let .notDVDVideo(detail) = e, !detail.isEmpty {
+                        Text(detail)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                     if let dvd = model.dvdInDrive {
                         Button("Opnieuw proberen") { model.openDrive(dvd) }
                     }

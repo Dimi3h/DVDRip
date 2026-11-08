@@ -23,6 +23,7 @@ struct dr_disc {
     pthread_mutex_t lock;
     dr_log_cb log;
     void *log_ctx;
+    char open_log[2048];          // libdvdread/libdvdcss messages while opening, for error reports
 };
 
 /// One playable cell of a title (after angle selection), in presentation order.

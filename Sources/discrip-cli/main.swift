@@ -39,5 +39,6 @@ do {
     print(out)
 } catch {
     print("ERROR:", error.localizedDescription)
+    if case let DiscRipError.notDVDVideo(detail) = error, !detail.isEmpty { print("DETAIL:", detail) }
     exit(1)
 }

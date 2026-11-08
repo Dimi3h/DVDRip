@@ -79,6 +79,12 @@ static void dvdread_log(void *priv, dvd_logger_level_t level, const char *fmt, v
     }
     if (disc->log) disc->log(disc->log_ctx, level == DVD_LOGGER_LEVEL_ERROR ? 0 : 1, msg);
     else if (level == DVD_LOGGER_LEVEL_ERROR) fprintf(stderr, "libdvdread: %s\n", msg);
+    // Keep errors and warnings from the open phase so a failed open can say why.
+    if (!disc->vmg && (level == DVD_LOGGER_LEVEL_ERROR || level == DVD_LOGGER_LEVEL_WARN)) {
+        size_t used = strlen(disc->open_log);
+        if (used + 4 < sizeof disc->open_log)
+            snprintf(disc->open_log + used, sizeof disc->open_log - used, "%s%s", used ? " | " : "", msg);
+    }
 }
 
 dr_disc *dr_disc_open(const char *path, const char *css_cache_dir, char **error_out) {
@@ -99,15 +105,23 @@ dr_disc *dr_disc_open(const char *path, const char *css_cache_dir, char **error_
     if (!disc->dvd) {
         if (error_out) {
             char buf[600];
-            snprintf(buf, sizeof buf, "Cannot open DVD-Video at %s", path);
-            *error_out = strdup(buf);
+            char buf2[2600];
+            snprintf(buf2, sizeof buf2, "Cannot open DVD-Video at %s (errno %d: %s)%s%s", path, errno, strerror(errno),
+                     disc->open_log[0] ? ": " : "", disc->open_log);
+            (void)buf;
+            *error_out = strdup(buf2);
         }
         dr_disc_close(disc);
         return NULL;
     }
     disc->vmg = ifoOpen(disc->dvd, 0);
     if (!disc->vmg || !disc->vmg->tt_srpt) {
-        if (error_out) *error_out = strdup("No valid VIDEO_TS.IFO: not a DVD-Video disc");
+        if (error_out) {
+            char buf[2600];
+            snprintf(buf, sizeof buf, "No valid VIDEO_TS.IFO at %s%s%s", path, disc->open_log[0] ? ": " : "",
+                     disc->open_log);
+            *error_out = strdup(buf);
+        }
         dr_disc_close(disc);
         return NULL;
     }
