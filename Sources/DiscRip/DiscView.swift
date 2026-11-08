@@ -3,7 +3,7 @@ import SwiftUI
 
 struct DiscView: View {
     @Environment(AppModel.self) private var model
-    @ViewState private var showAllTitles = false
+    @ViewState private var choosingTitle = false
 
     var body: some View {
         @Bindable var model = model
@@ -16,27 +16,36 @@ struct DiscView: View {
 
             RegionSection()
 
-            Section {
-                let top = model.candidates.filter(\.plausible).prefix(4)
-                let shown = showAllTitles ? Array(model.candidates) : Array(top.isEmpty ? model.candidates.prefix(4) : top)
-                ForEach(shown) { c in
-                    TitleRow(candidate: c, isWinner: c.id == model.candidates.first?.id,
-                             isSelected: model.selectedTitle == c.id) {
-                        model.selectTitle(c.id)
-                        Haptics.tap()
+            if choosingTitle {
+                Section {
+                    ForEach(model.candidates) { c in
+                        TitleRow(candidate: c, isWinner: c.id == model.candidates.first?.id,
+                                 isSelected: model.selectedTitle == c.id) {
+                            model.selectTitle(c.id)
+                            Haptics.tap()
+                            withAnimation { choosingTitle = false }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Titel kiezen")
+                        Spacer()
+                        Button("Annuleren") { withAnimation { choosingTitle = false } }
+                            .buttonStyle(.link)
+                    }
+                } footer: {
+                    Text("Een ‘alles afspelen’-titel van bonusmateriaal verliest van een echt programma; titels met dezelfde inhoud staan onderaan.")
+                        .foregroundStyle(.secondary)
+                }
+            } else if let t = model.currentTitle {
+                Section("Hoofdfilm") {
+                    MainFeatureRow(title: t, isAutomatic: t.index == model.candidates.first?.id)
+                    if model.candidates.count > 1 {
+                        Button("Andere titel kiezen…") { withAnimation { choosingTitle = true } }
+                            .buttonStyle(.link)
+                            .font(.callout)
                     }
                 }
-                if model.candidates.count > shown.count || showAllTitles {
-                    Button(showAllTitles ? String(localized: "Minder titels tonen") : String(localized: "Alle \(model.candidates.count) titels tonen")) {
-                        withAnimation { showAllTitles.toggle() }
-                    }
-                    .buttonStyle(.link)
-                }
-            } header: {
-                Text("Hoofdfilm")
-            } footer: {
-                Text("DiscRip koos de langste plausibele titel. Een ‘alles afspelen’-titel van bonusmateriaal verliest van een echt programma; titels met dezelfde inhoud staan onder ‘Alle titels tonen’.")
-                    .foregroundStyle(.secondary)
             }
 
             if let t = model.currentTitle {
@@ -111,6 +120,44 @@ struct DiscView: View {
     }
 }
 
+/// "43:20 · 9 hoofdstukken · 1 audio · 0 ondertitels · PAL 16:9"
+private func titleSummary(_ t: TitleInfo) -> String {
+    [Format.duration(t.duration),
+     t.chapters == 1 ? String(localized: "1 hoofdstuk") : String(localized: "\(t.chapters) hoofdstukken"),
+     String(localized: "\(t.audio.count) audio"),
+     String(localized: "\(t.subtitles.count) ondertitels"),
+     "\(t.video.standard) \(t.video.aspect)"].joined(separator: " · ")
+}
+
+/// The chosen title, without a choice: what will be ripped.
+private struct MainFeatureRow: View {
+    let title: TitleInfo
+    let isAutomatic: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "film")
+                .font(.title2)
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Titel \(title.index)").font(.headline)
+                    if !isAutomatic {
+                        Text("Zelf gekozen").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text(verbatim: titleSummary(title))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(Format.bytes(title.sizeBytes)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 private struct TitleRow: View {
     let candidate: TitleScoring.Candidate
     let isWinner: Bool
@@ -140,11 +187,7 @@ private struct TitleRow: View {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    Text(verbatim: [Format.duration(t.duration),
-                                   t.chapters == 1 ? String(localized: "1 hoofdstuk") : String(localized: "\(t.chapters) hoofdstukken"),
-                                   String(localized: "\(t.audio.count) audio"),
-                                   String(localized: "\(t.subtitles.count) ondertitels"),
-                                   "\(t.video.standard) \(t.video.aspect)"].joined(separator: " · "))
+                    Text(verbatim: titleSummary(t))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     if let d = candidate.duplicateOf {

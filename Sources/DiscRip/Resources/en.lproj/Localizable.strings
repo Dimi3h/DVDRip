@@ -44,11 +44,12 @@
 /* Disc */
 "%lld titels op de disc" = "%lld titles on the disc";
 "Hoofdfilm" = "Main feature";
-"DiscRip koos de langste plausibele titel. Een ‘alles afspelen’-titel van bonusmateriaal verliest van een echt programma; titels met dezelfde inhoud staan onder ‘Alle titels tonen’." = "DiscRip picked the longest plausible title. A ‘play all’ title of bonus material loses from a real programme; titles with identical content are under ‘Show all titles’.";
+"Een ‘alles afspelen’-titel van bonusmateriaal verliest van een echt programma; titels met dezelfde inhoud staan onderaan." = "A ‘play all’ title of bonus material loses from a real programme; titles with identical content are at the bottom.";
+"Titel kiezen" = "Choose Title";
+"Andere titel kiezen…" = "Choose Another Title…";
+"Zelf gekozen" = "Chosen manually";
 "Zelfde inhoud als titel %lld" = "Same content as title %lld";
 "Speelt titels %@ na elkaar (%lld onderdelen)" = "Plays titles %1$@ back to back (%2$lld parts)";
-"Minder titels tonen" = "Show fewer titles";
-"Alle %lld titels tonen" = "Show all %lld titles";
 "Titel %lld" = "Title %lld";
 "1 hoofdstuk" = "1 chapter";
 "%lld hoofdstukken" = "%lld chapters";
