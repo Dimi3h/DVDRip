@@ -36,13 +36,9 @@ public final class NASService: @unchecked Sendable {
     public static func isReachable(host: String, timeout: TimeInterval = 5) async -> Bool {
         await withCheckedContinuation { cont in
             let conn = NWConnection(host: NWEndpoint.Host(host), port: 445, using: .tcp)
-            let lock = NSLock()
-            var done = false
-            func finish(_ ok: Bool) {
-                lock.lock()
-                defer { lock.unlock() }
-                guard !done else { return }
-                done = true
+            let once = Once()
+            @Sendable func finish(_ ok: Bool) {
+                guard once.claim() else { return }
                 conn.cancel()
                 cont.resume(returning: ok)
             }
@@ -56,6 +52,19 @@ public final class NASService: @unchecked Sendable {
             }
             conn.start(queue: .global())
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { finish(false) }
+        }
+    }
+
+    /// Thread-safe "first caller wins" flag.
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        func claim() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if done { return false }
+            done = true
+            return true
         }
     }
 

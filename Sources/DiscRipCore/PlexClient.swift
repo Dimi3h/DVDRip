@@ -17,6 +17,13 @@ public struct PlexClient: Sendable {
             case key, title, type
             case location = "Location"
         }
+
+        public init(key: String, title: String, type: String, location: [PathLocation]?) {
+            self.key = key
+            self.title = title
+            self.type = type
+            self.location = location
+        }
     }
 
     public struct Item: Codable, Equatable, Sendable {
