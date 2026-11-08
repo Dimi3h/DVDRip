@@ -72,6 +72,8 @@ Opmerkingen bij de build zonder Xcode:
   daarom `@ViewState`, een typealias naar dezelfde property wrapper.
 - De scripts gebruiken `--build-system native`. Met `SCRATCH=/pad` kies je een andere build-map.
 - Debug-uitvoer van de pipeline per pakket: `DISCRIP_DEBUG=1`.
+- Diagnose zonder app: `swift run --build-system native discrip-cli info /dev/rdisk4` of
+  `discrip-cli rip /dev/rdisk4 uit.mkv [preset]`.
 - `DiscRip --snapshot <map> --open <iso>` rendert de schermen offscreen naar PNG.
 
 ## Instellingen en gegevens
@@ -106,6 +108,13 @@ overeenkomen met die bibliotheeklocatie.
    opent vanzelf.
 7. Test de foutgevallen één keer: trek de USB-kabel uit tijdens een rip (duidelijke fout, geen half
    bestand), haal de NAS van het netwerk, gebruik een fout Plex-token, en gebruik een volle USB-stick.
+
+## Snelheid
+
+Een rip met "Beste kwaliteit" gebruikt amper CPU; de drive bepaalt het tempo. Gemeten met een
+LG GP57ES40 (USB): de drive meldt zelf 4× dvd-snelheid (5,5 MB/s) als maximum en negeert een verzoek
+om sneller te lezen. Binnenaan de disc haalt hij ~3,5 MB/s, buitenaan ~5,2 MB/s. Grotere leesblokken
+helpen niet. Een film van 4 GB duurt zo ongeveer 18 minuten.
 
 ## Licenties
 

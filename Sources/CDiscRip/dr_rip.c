@@ -103,6 +103,30 @@ typedef struct {
     int64_t media_pts90;
 } rip_ctx;
 
+// FFmpeg messages of the rip running on this thread go to the rip log (worker threads of the
+// decoders keep the default stderr output).
+static __thread rip_ctx *tls_rip;
+static pthread_once_t dr_av_log_once = PTHREAD_ONCE_INIT;
+
+static void av_log_forward(void *avcl, int level, const char *fmt, va_list vl) {
+    if (level > AV_LOG_WARNING) return;
+    if (!tls_rip) {
+        av_log_default_callback(avcl, level, fmt, vl);
+        return;
+    }
+    char line[1024];
+    int prefix = 1;
+    av_log_format_line(avcl, level, fmt, vl, line, sizeof line, &prefix);
+    size_t n = strlen(line);
+    while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
+    if (n) dr_logf(tls_rip->disc, level <= AV_LOG_ERROR ? 0 : 1, "ffmpeg: %s", line);
+}
+
+static void install_av_log(void) {
+    av_log_set_level(AV_LOG_WARNING);
+    av_log_set_callback(av_log_forward);
+}
+
 static double now_seconds(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -865,7 +889,10 @@ static int handle_packet(rip_ctx *r, AVPacket *pkt) {
     switch (t->kind) {
     case OUT_VIDEO:
         if (r->venc) return decode_video(r, pkt);
+        if (pkt->pts == AV_NOPTS_VALUE && pkt->dts == AV_NOPTS_VALUE && t->last_dts == AV_NOPTS_VALUE)
+            return 0; // nothing to anchor it to yet (before the first timestamp)
         if (pkt->dts == AV_NOPTS_VALUE) pkt->dts = t->last_dts == AV_NOPTS_VALUE ? pkt->pts : t->last_dts + 1;
+        if (pkt->pts == AV_NOPTS_VALUE) pkt->pts = pkt->dts; // genpts could not fill it
         if (t->last_dts != AV_NOPTS_VALUE && pkt->dts <= t->last_dts) pkt->dts = t->last_dts + 1;
         if (pkt->pts != AV_NOPTS_VALUE && pkt->pts < pkt->dts) pkt->pts = pkt->dts;
         t->last_dts = pkt->dts;
@@ -898,6 +925,9 @@ static int handle_packet(rip_ctx *r, AVPacket *pkt) {
 // ---------------------------------------------------------------------------------------------
 
 static void cleanup(rip_ctx *r) {
+    tls_rip = NULL;
+    r->disc->log = NULL;
+    r->disc->log_ctx = NULL;
     for (int i = 0; i < r->track_count; i++) {
         out_track *t = &r->tracks[i];
         avcodec_free_context(&t->dec);
@@ -943,7 +973,10 @@ int dr_rip(dr_disc *disc, const dr_rip_options *opt, dr_rip_result *res) {
     r->video_in_index = -1;
     r->is_device = strncmp(disc->path, "/dev/", 5) == 0;
     r->debug = getenv("DISCRIP_DEBUG") != NULL;
-    av_log_set_level(AV_LOG_ERROR);
+    pthread_once(&dr_av_log_once, install_av_log);
+    tls_rip = r;
+    disc->log = opt->log;
+    disc->log_ctx = opt->ctx;
 
     if (dr_title_layout_build(disc, opt->title, opt->angle, &r->L) != 0) {
         set_error(r, DR_ERR_OPEN_TITLE, "Title %d has no playable cells", opt->title);
@@ -980,6 +1013,8 @@ int dr_rip(dr_disc *disc, const dr_rip_options *opt, dr_rip_result *res) {
     r->ic->pb = avio;
     r->ic->probesize = 32 * 1024 * 1024;
     r->ic->max_analyze_duration = 30 * (int64_t)AV_TIME_BASE;
+    // Real discs carry a PTS only on PES packets that start a frame; Matroska needs one per frame.
+    r->ic->flags |= AVFMT_FLAG_GENPTS;
     r->ic->interrupt_callback.callback = interrupt_cb;
     r->ic->interrupt_callback.opaque = r;
     const AVInputFormat *ps = av_find_input_format("mpeg");

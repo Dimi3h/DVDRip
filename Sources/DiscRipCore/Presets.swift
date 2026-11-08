@@ -64,7 +64,7 @@ public enum SizeEstimator {
     public static func audioBitrate(_ t: AudioTrack) -> Int64 {
         switch t.format {
         case "ac3": return t.channels >= 6 ? 448_000 : 192_000
-        case "dts": return t.channels >= 6 ? 768_000 : 384_000
+        case "dts": return t.channels >= 5 ? 768_000 : 384_000
         case "lpcm": return Int64(t.channels) * Int64(t.sampleRate) * Int64(max(t.bits, 16))
         default: return 224_000
         }

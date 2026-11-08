@@ -6,6 +6,7 @@
 #            3 chapters, 16:9 anamorphic, interlaced MPEG-2.
 #   Audio:   #1 AC-3 2.0 Dutch, #2 LPCM 16-bit 2.0 English
 #   Subs:    0x20 Dutch, 0x21 English (VobSub)
+#   Every third video PES of the main title has no PTS/DTS, like on real discs.
 # Requires native/out/bin/{ffmpeg,dvdauthor} (native/scripts/build-native.sh and build-test-tools.sh).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,9 +34,9 @@ segment main2 8 550
 
 python3 "$ROOT/scripts/tools/inject_dvdsub.py" "$WORK/extra.raw.mpg" "$WORK/extra.mpg" --lpcm-id 0xa1 \
   --sub 0x20:1.0:1.5 --sub 0x21:1.2:1.5
-python3 "$ROOT/scripts/tools/inject_dvdsub.py" "$WORK/main1.raw.mpg" "$WORK/main1.mpg" --lpcm-id 0xa1 \
+python3 "$ROOT/scripts/tools/inject_dvdsub.py" "$WORK/main1.raw.mpg" "$WORK/main1.mpg" --lpcm-id 0xa1 --strip-video-pts 3 \
   --sub 0x20:1.0:2.0 --sub 0x21:1.5:2.0 --sub 0x20:6.0:2.0 --sub 0x21:6.5:2.0
-python3 "$ROOT/scripts/tools/inject_dvdsub.py" "$WORK/main2.raw.mpg" "$WORK/main2.mpg" --lpcm-id 0xa1 \
+python3 "$ROOT/scripts/tools/inject_dvdsub.py" "$WORK/main2.raw.mpg" "$WORK/main2.mpg" --lpcm-id 0xa1 --strip-video-pts 3 \
   --sub 0x20:2.0:2.0 --sub 0x21:4.0:2.0
 
 cat > "$WORK/dvd.xml" <<EOF

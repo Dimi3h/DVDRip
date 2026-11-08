@@ -128,6 +128,8 @@ public struct AudioTrack: Codable, Sendable, Equatable, Hashable, Identifiable {
     }
 
     public var channelLabel: String {
+        // DTS 5.1 is often flagged with five channels in the IFO (the LFE is not counted).
+        if format == "dts" && channels == 5 { return "5.1" }
         switch channels {
         case 1: return "1.0"
         case 2: return "2.0"

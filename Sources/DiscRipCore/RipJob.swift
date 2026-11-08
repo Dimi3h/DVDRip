@@ -115,7 +115,8 @@ public final class RipJob: @unchecked Sendable {
     let logURL: URL
     private var logHandle: FileHandle?
 
-    public init(plan: RipPlan, settings: AppSettings, nasPassword: String, plexToken: String, disc: NativeDisc) {
+    public init(plan: RipPlan, settings: AppSettings, nasPassword: String, plexToken: String, disc: NativeDisc,
+                logDirectory: URL = AppPaths.logDirectory) {
         self.plan = plan
         self.settings = settings
         self.nasPassword = nasPassword
@@ -123,8 +124,8 @@ public final class RipJob: @unchecked Sendable {
         self.disc = disc
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
-        try? FileManager.default.createDirectory(at: AppPaths.logDirectory, withIntermediateDirectories: true)
-        logURL = AppPaths.logDirectory.appendingPathComponent("rip-\(f.string(from: Date())).log")
+        try? FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+        logURL = logDirectory.appendingPathComponent("rip-\(f.string(from: Date())).log")
     }
 
     func log(_ s: String) {
@@ -137,6 +138,18 @@ public final class RipJob: @unchecked Sendable {
 
     public func run(cancel: CancelToken, update: @escaping @Sendable (JobUpdate) -> Void) async throws -> JobResult {
         defer { try? logHandle?.close() }
+        do {
+            let result = try await perform(cancel: cancel, update: update)
+            for w in result.warnings { log("WARNING: \(w)") }
+            log("Finished")
+            return result
+        } catch {
+            log("FAILED: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
+            throw error
+        }
+    }
+
+    private func perform(cancel: CancelToken, update: @escaping @Sendable (JobUpdate) -> Void) async throws -> JobResult {
         update(JobUpdate(phase: .preparing))
         log("Rip \(plan.metadata.title) title \(plan.title.index) preset \(plan.preset.rawValue) storage \(plan.storage.rawValue)")
         var warnings: [String] = []

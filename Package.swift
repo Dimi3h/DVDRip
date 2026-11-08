@@ -70,6 +70,12 @@ let package = Package(
             exclude: ["Resources"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .executableTarget(
+            name: "discrip-cli",
+            dependencies: ["DiscRipCore"],
+            path: "Sources/discrip-cli",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         // Test suites are plain library targets so that DiscRipTestRunner can run them with only the
         // Command Line Tools installed (`swift run DiscRipTestRunner`).
         .target(

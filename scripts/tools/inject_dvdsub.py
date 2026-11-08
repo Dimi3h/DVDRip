@@ -4,7 +4,9 @@ DiscRip test disc:
 
 * renumbers the LPCM substream id so that every DVD audio stream has its own number
   (ffmpeg numbers AC-3 and LPCM independently, DVD-Video uses one shared number space), and
-* inserts simple VobSub subpicture units (a framed box) for one or more subtitle streams.
+* inserts simple VobSub subpicture units (a framed box) for one or more subtitle streams, and
+* optionally removes the timestamps from some video PES packets (--strip-video-pts N: every Nth
+  video PES that has one, starting with the second), as on real discs where not every frame carries a PTS.
 
 Usage: inject_dvdsub.py IN OUT --lpcm-id 0xa1 --sub 0x20:1.0:2.5 --sub 0x21:4.0:2.0 ...
        (--sub STREAMID:START_SECONDS:DURATION_SECONDS, times relative to the first video PTS)
@@ -117,6 +119,7 @@ def main():
     ap.add_argument("output")
     ap.add_argument("--lpcm-id", type=lambda s: int(s, 0), default=None)
     ap.add_argument("--sub", action="append", default=[])
+    ap.add_argument("--strip-video-pts", type=int, default=0)
     args = ap.parse_args()
 
     data = open(args.input, "rb").read()
@@ -124,6 +127,7 @@ def main():
         sys.exit("input is not made of 2048-byte packs")
     packs = [bytearray(data[i:i + PACK]) for i in range(0, len(data), PACK)]
     first_video_pts = None
+    video_pes = 0
     for p in packs:
         if p[:4] != b"\x00\x00\x01\xBA":
             sys.exit("unexpected pack header")
@@ -135,6 +139,13 @@ def main():
             length = struct.unpack(">H", p[i + 4:i + 6])[0]
             if sid == 0xE0 and first_video_pts is None and (p[i + 7] & 0x80):
                 first_video_pts = read_pts(p, i + 9)
+            elif sid == 0xE0 and (p[i + 7] & 0x80) and args.strip_video_pts:
+                video_pes += 1
+                if video_pes % args.strip_video_pts == 1:  # includes the frame right after the first
+                    # Clear PTS_DTS_flags; the timestamp bytes become header stuffing (0xFF).
+                    hdr_len = p[i + 8]
+                    p[i + 7] &= 0x3F
+                    p[i + 9:i + 9 + hdr_len] = b"\xFF" * hdr_len
             if sid == 0xBD and args.lpcm_id is not None:
                 hdr_len = p[i + 8]
                 sub = i + 9 + hdr_len

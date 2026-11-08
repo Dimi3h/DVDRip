@@ -1,1 +1,162 @@
-{"volumeLabel":"DISCRIP_TEST_D1","discRegionMask":0,"titles":[{"index":1,"vts":1,"ttn":1,"angles":1,"chapters":1,"cells":1,"durationMs":4000,"sectors":866,"cssKeyMissing":false,"video":{"width":720,"height":576,"standard":"PAL","aspect":"16:9","letterboxed":false,"filmMode":false,"fps":25},"chapterStartsMs":[0],"audio":[{"streamId":128,"logical":0,"format":"ac3","channels":2,"sampleRate":48000,"bits":0,"lang":"nl","codeExtension":0},{"streamId":161,"logical":1,"format":"lpcm","channels":2,"sampleRate":48000,"bits":16,"lang":"en","codeExtension":0}],"subtitles":[{"streamId":32,"logical":0,"lang":"nl","codeExtension":0},{"streamId":33,"logical":1,"lang":"en","codeExtension":0}],"palette":["000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000"]},{"index":2,"vts":1,"ttn":2,"angles":1,"chapters":3,"cells":3,"durationMs":18000,"sectors":3692,"cssKeyMissing":false,"video":{"width":720,"height":576,"standard":"PAL","aspect":"16:9","letterboxed":false,"filmMode":false,"fps":25},"chapterStartsMs":[0,5200,10000],"audio":[{"streamId":128,"logical":0,"format":"ac3","channels":2,"sampleRate":48000,"bits":0,"lang":"nl","codeExtension":0},{"streamId":161,"logical":1,"format":"lpcm","channels":2,"sampleRate":48000,"bits":16,"lang":"en","codeExtension":0}],"subtitles":[{"streamId":32,"logical":0,"lang":"nl","codeExtension":0},{"streamId":33,"logical":1,"lang":"en","codeExtension":0}],"palette":["000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000"]}]}
+{
+  "discRegionMask" : 0,
+  "titles" : [
+    {
+      "angles" : 1,
+      "audio" : [
+        {
+          "bits" : 0,
+          "channels" : 2,
+          "codeExtension" : 0,
+          "format" : "ac3",
+          "lang" : "nl",
+          "logical" : 0,
+          "sampleRate" : 48000,
+          "streamId" : 128
+        },
+        {
+          "bits" : 16,
+          "channels" : 2,
+          "codeExtension" : 0,
+          "format" : "lpcm",
+          "lang" : "en",
+          "logical" : 1,
+          "sampleRate" : 48000,
+          "streamId" : 161
+        }
+      ],
+      "cells" : 1,
+      "chapterStartsMs" : [
+        0
+      ],
+      "chapters" : 1,
+      "cssKeyMissing" : false,
+      "durationMs" : 4000,
+      "index" : 1,
+      "palette" : [
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000"
+      ],
+      "sectors" : 866,
+      "subtitles" : [
+        {
+          "codeExtension" : 0,
+          "lang" : "nl",
+          "logical" : 0,
+          "streamId" : 32
+        },
+        {
+          "codeExtension" : 0,
+          "lang" : "en",
+          "logical" : 1,
+          "streamId" : 33
+        }
+      ],
+      "ttn" : 1,
+      "video" : {
+        "aspect" : "16:9",
+        "filmMode" : false,
+        "fps" : 25,
+        "height" : 576,
+        "letterboxed" : false,
+        "standard" : "PAL",
+        "width" : 720
+      },
+      "vts" : 1
+    },
+    {
+      "angles" : 1,
+      "audio" : [
+        {
+          "bits" : 0,
+          "channels" : 2,
+          "codeExtension" : 0,
+          "format" : "ac3",
+          "lang" : "nl",
+          "logical" : 0,
+          "sampleRate" : 48000,
+          "streamId" : 128
+        },
+        {
+          "bits" : 16,
+          "channels" : 2,
+          "codeExtension" : 0,
+          "format" : "lpcm",
+          "lang" : "en",
+          "logical" : 1,
+          "sampleRate" : 48000,
+          "streamId" : 161
+        }
+      ],
+      "cells" : 3,
+      "chapterStartsMs" : [
+        0,
+        5120,
+        10000
+      ],
+      "chapters" : 3,
+      "cssKeyMissing" : false,
+      "durationMs" : 18000,
+      "index" : 2,
+      "palette" : [
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000",
+        "000000"
+      ],
+      "sectors" : 3692,
+      "subtitles" : [
+        {
+          "codeExtension" : 0,
+          "lang" : "nl",
+          "logical" : 0,
+          "streamId" : 32
+        },
+        {
+          "codeExtension" : 0,
+          "lang" : "en",
+          "logical" : 1,
+          "streamId" : 33
+        }
+      ],
+      "ttn" : 2,
+      "video" : {
+        "aspect" : "16:9",
+        "filmMode" : false,
+        "fps" : 25,
+        "height" : 576,
+        "letterboxed" : false,
+        "standard" : "PAL",
+        "width" : 720
+      },
+      "vts" : 1
+    }
+  ],
+  "volumeLabel" : "DISCRIP_TEST_D1"
+}

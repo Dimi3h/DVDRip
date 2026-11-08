@@ -131,6 +131,12 @@ private func title(_ i: Int, minutes: Double, chapters: Int = 10, audio: Int = 2
         #expect(Region.compatibility(drive: nil, discDisabledMask: 0xfe) == .regionFree)
     }
 
+    @Test func channelLabels() {
+        #expect(AudioTrack(streamId: 0x89, format: "dts", channels: 5).channelLabel == "5.1")
+        #expect(AudioTrack(streamId: 0x80, format: "ac3", channels: 6).channelLabel == "5.1")
+        #expect(AudioTrack(streamId: 0x80, format: "ac3", channels: 2).channelLabel == "2.0")
+    }
+
     @Test func sampleAspectRatios() {
         #expect(VideoInfo(width: 720, height: 576, aspect: "16:9").sampleAspectRatio == (64, 45))
         #expect(VideoInfo(width: 720, height: 480, aspect: "16:9").sampleAspectRatio == (32, 27))

@@ -71,7 +71,8 @@ import Testing
         let plan = RipPlan(sourcePath: Self.iso.path, volumeLabel: info.volumeLabel, title: main, audio: audio,
                            subtitles: main.subtitles, preset: preset, bitrateKbps: settings.bitrateKbps(for: preset),
                            lpcmToFlac: lpcmToFlac, metadata: meta, storage: .local)
-        let job = RipJob(plan: plan, settings: settings, nasPassword: "", plexToken: "", disc: disc)
+        let job = RipJob(plan: plan, settings: settings, nasPassword: "", plexToken: "", disc: disc,
+                         logDirectory: tmp.appendingPathComponent("logs"))
         let result = try await job.run(cancel: CancelToken()) { _ in }
         return (tmp, result, tmp.appendingPathComponent("Films/Test Film (2024) {tmdb-4242}/Test Film (2024) {tmdb-4242}.mkv"))
     }
@@ -106,7 +107,9 @@ import Testing
         #expect(p.streams[1...].map { $0.tags?["language"] } == ["dut", "eng", "dut", "eng"])
         #expect(p.streams[1].disposition?["default"] == 1)
         #expect(p.chapters.count == 3)
-        #expect(p.chapters.map { Double($0.start_time)! } == [0, 5.2, 10])
+        let ifoChapters = try NativeDisc(path: Self.iso.path).info().titles[1].chapterStartsMs.map { Double($0) / 1000 }
+        #expect(p.chapters.map { Double($0.start_time)! } == ifoChapters)
+        #expect(ifoChapters.count == 3 && ifoChapters[0] == 0 && ifoChapters[2] == 10)
         #expect(p.chapters[0].tags?["title"] == "Hoofdstuk 1")
         #expect(p.format.tags?["TITLE"] == "Test Film")
         #expect(p.format.tags?["DATE_RELEASED"] == "2024")
@@ -152,7 +155,8 @@ import Testing
                            preset: .lossless, bitrateKbps: 0, lpcmToFlac: false,
                            metadata: MediaMetadata(title: "Huge"), storage: .local)
         await #expect {
-            _ = try await RipJob(plan: plan, settings: settings, nasPassword: "", plexToken: "", disc: disc)
+            _ = try await RipJob(plan: plan, settings: settings, nasPassword: "", plexToken: "", disc: disc,
+                                 logDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("discrip-logs"))
                 .run(cancel: CancelToken()) { _ in }
         } throws: { error in
             if case .insufficientSpace = error as? DiscRipError { return true }
