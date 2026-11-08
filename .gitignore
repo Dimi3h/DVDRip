@@ -1,0 +1,12 @@
+# SwiftPM
+.build/
+.swiftpm/
+*.xcodeproj
+# Native build (sources and outputs are reproducible with native/scripts)
+native/.build/
+native/out/
+# App bundle output
+dist/
+# Partial rips
+*.partial
+.DS_Store
